@@ -1,0 +1,84 @@
+menu "OPSEC Features"
+
+    config OPSEC_HMAC_TOPIC
+        bool "Use HMAC-derived opaque MQTT topics"
+        default y if WOL_PROFILE_HARDENED
+        default n
+        help
+            Derives the MQTT command and response topic names from
+            HMAC-SHA256 of the chip MAC and a 32-byte secret stored
+            in NVS.  The secret is generated randomly on first boot.
+
+            Result: topics appear as 16-character hex strings
+            (e.g. "d4f3a891c02e57b3") with no identifiable relation
+            to Wake-on-LAN or to the device.
+
+            Derivation:
+              digest        = HMAC-SHA256(secret, chip_mac_bytes)
+              command_topic = hex(digest[0..7])    // 16 hex chars
+              response_topic= hex(digest[8..15])   // 16 hex chars
+
+            In STANDARD builds the topics are plain strings:
+              command_topic  = "wol/<MAC>"
+              response_topic = "wol/<MAC>/r"
+
+    config OPSEC_TOTP
+        bool "Require TOTP-signed payloads (anti-replay)"
+        default y if WOL_PROFILE_HARDENED
+        default n
+        depends on OPSEC_HMAC_TOPIC
+        help
+            Requires incoming MQTT payloads to include a valid
+            RFC 6238 TOTP suffix in addition to the target MAC.
+
+            Payload format (without TOTP):
+              "AA:BB:CC:DD:EE:FF"
+
+            Payload format (with TOTP):
+              "AA:BB:CC:DD:EE:FF:123456"
+
+            The 6-digit code is validated against a 20-byte TOTP
+            seed stored in NVS (generated randomly on first boot).
+            The acceptance window is T-1, T, T+1 (±60 seconds) to
+            tolerate clock drift between the ESP32 and the sender.
+
+            The ESP32 must have synchronized its clock via SNTP
+            before TOTP validation is active.  Until clock sync,
+            TOTP payloads are rejected and a warning is logged.
+
+            The companion trigger script (scripts/wake.sh) handles
+            TOTP generation automatically.
+
+    config OPSEC_TOTP_STEP_SEC
+        int "TOTP time step in seconds"
+        default 30
+        range 15 60
+        depends on OPSEC_TOTP
+        help
+            Duration of each TOTP window.  RFC 6238 mandates 30 s.
+            Matching the sender and the ESP32 to the same value is
+            required — do not change unless you also update the
+            trigger script.
+
+    config OPSEC_TOTP_DIGITS
+        int "TOTP code length (digits)"
+        default 6
+        range 6 8
+        depends on OPSEC_TOTP
+        help
+            Number of digits in the TOTP code.  6 is the RFC 6238
+            standard.  8 gives a larger code space but is less
+            convenient to type manually.
+
+    config OPSEC_SNTP_SERVER
+        string "SNTP server hostname"
+        default "pool.ntp.org"
+        depends on OPSEC_TOTP
+        help
+            NTP server used to synchronise the ESP32 clock for TOTP
+            validation.  pool.ntp.org resolves to the nearest
+            Stratum 2 server.  Replace with a local NTP server or a
+            trusted public one (e.g. "time.cloudflare.com") if
+            preferred.
+
+endmenu

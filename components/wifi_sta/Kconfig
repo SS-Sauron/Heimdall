@@ -1,0 +1,31 @@
+menu "WiFi Station"
+
+    config WIFI_STA_MAX_RETRY
+        int "Maximum connection retry attempts before giving up"
+        default 10
+        range 1 50
+        help
+            Number of times the WiFi station will attempt to reconnect
+            after a disconnection event before logging a fatal error
+            and rebooting. Each retry waits WIFI_STA_RETRY_DELAY_MS
+            milliseconds before the next attempt.
+
+    config WIFI_STA_RETRY_DELAY_MS
+        int "Delay between retry attempts (ms)"
+        default 3000
+        range 500 30000
+        help
+            Milliseconds to wait between consecutive reconnect attempts.
+            3000 ms (3 seconds) is a reasonable default. Increase this
+            on congested networks where rapid retries worsen the problem.
+
+    config WIFI_STA_CONNECT_TIMEOUT_MS
+        int "Initial connection timeout (ms)"
+        default 15000
+        range 5000 60000
+        help
+            Maximum time to wait for the first successful connection after
+            boot. If this expires, the device reboots back into portal mode
+            on the assumption that the stored credentials are wrong.
+
+endmenu

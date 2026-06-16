@@ -1,0 +1,48 @@
+menu "MQTT Relay"
+
+    config MQTT_RELAY_KEEPALIVE_SEC
+        int "MQTT keepalive interval (seconds)"
+        default 60
+        range 15 3600
+        help
+            How often the ESP32 sends a PINGREQ to the broker when idle.
+            This keeps the TCP connection alive through NAT timeouts and
+            tells the broker that the client is still alive.
+
+            60 seconds is a good default.  Reduce if your broker or
+            network has aggressive NAT timeout rules.
+
+    config MQTT_RELAY_RECONNECT_TIMEOUT_MS
+        int "MQTT reconnect timeout (ms)"
+        default 5000
+        range 1000 60000
+        help
+            Time the esp_mqtt_client waits before attempting to reconnect
+            after a disconnection.  The client handles reconnection
+            automatically; this controls the backoff delay.
+
+    config MQTT_RELAY_TASK_STACK_KB
+        int "MQTT client internal task stack size (KB)"
+        default 8
+        range 2 16
+        help
+            Stack size for the esp_mqtt_client internal FreeRTOS task.
+            This is the task that calls mqtt_event_handler for every event.
+            In the HARDENED build the handler runs TOTP (mbedTLS), opens a
+            UDP socket, and calls esp_mqtt_client_publish — a deep call chain
+            that requires at least 8 KB. 4 KB will cause a stack overflow.
+
+    config MQTT_RELAY_SKIP_CERT_CN_CHECK
+        bool "Skip TLS certificate common name check"
+        default y
+        help
+            When enabled, the ESP32 does not verify that the broker's
+            TLS certificate common name matches the broker hostname.
+            This is required for most hosted MQTT brokers that use
+            wildcard certificates or SNI.
+
+            Disable only if you are running your own MQTT broker with
+            a certificate whose CN exactly matches the hostname stored
+            in NVS.
+
+endmenu

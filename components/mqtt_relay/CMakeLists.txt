@@ -1,0 +1,12 @@
+idf_component_register(
+    SRCS
+        "mqtt_relay.c"
+    INCLUDE_DIRS
+        "."
+    REQUIRES
+        esp_netif
+        storage
+        wol
+        opsec
+        app_update
+)

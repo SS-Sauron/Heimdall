@@ -1,0 +1,17 @@
+# WoL Relay — Custom Partition Table
+# Target: 4 MB flash (ESP32 / ESP32-S3 / ESP32-C3)
+#
+# Memory map:
+#   0x0000–0x8000  bootloader    (ESP-IDF managed, not listed here)
+#   0x8000–0x9000  partition table (4 KB, ESP-IDF managed)
+#   0x9000 →       our partitions start here
+#
+# Name        Type    SubType   Offset     Size        
+nvs,          data,   nvs,      0x9000,    0x6000
+otadata,      data,   ota,      0xF000,    0x2000
+phy_init,     data,   phy,      0x11000,   0x1000
+nvs_keys,     data,   nvs_keys, 0x12000,   0x1000
+# 3 KB gap to align ota_0 to 0x10000 boundary (required by ESP-IDF OTA)
+ota_0,        app,    ota_0,    0x20000,   0x180000
+ota_1,        app,    ota_1,    0x1A0000,  0x180000
+spiffs,       data,   spiffs,   0x320000,  0xE0000   

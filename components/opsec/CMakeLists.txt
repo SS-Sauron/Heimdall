@@ -1,0 +1,14 @@
+idf_component_register(
+    SRCS
+        "opsec.c"
+    INCLUDE_DIRS
+        "."
+    REQUIRES
+        mbedtls
+        esp_system
+        esp_netif
+        lwip
+        storage
+    PRIV_REQUIRES
+        identity
+)

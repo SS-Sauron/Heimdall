@@ -1,0 +1,68 @@
+menu "Captive Portal"
+
+    config PORTAL_AP_SSID_PREFIX
+        string "SoftAP SSID prefix"
+        default "NETGEAR-"
+        help
+            Prefix for the provisioning AP SSID. The last 6 characters are
+            derived from a hash of the chip MAC so each device gets a unique
+            name that looks like a real router.
+
+            Keep this generic and plausible — use a common consumer router
+            brand (e.g. "TP-LINK-", "DLINK-", "HUAWEI-").
+
+            Max 26 characters so the full SSID stays within the 32-char limit.
+
+    config PORTAL_AP_PASSWORD_FROM_MAC
+        bool "Derive portal AP password from MAC hash"
+        default y
+        help
+            Generates a WPA2 password from a hash of the chip MAC address.
+            This makes the AP non-open while keeping the password reproducible
+            (same device always has the same password).
+
+            The password is printed to the serial console on first boot only
+            (controlled by CONFIG_WOL_SERIAL_PROVISION_INFO). Write it on a
+            label stuck to the underside of the device at deployment time.
+
+            If disabled, the AP is open (no password) which makes initial
+            setup easier but means any nearby device can connect to the portal.
+
+    config PORTAL_AP_CHANNEL
+        int "SoftAP WiFi channel"
+        default 6
+        range 1 13
+        help
+            WiFi channel for the provisioning AP. Channel 1, 6, or 11 are
+            the standard non-overlapping 2.4 GHz channels.
+
+    config PORTAL_AP_MAX_CONN
+        int "Maximum simultaneous portal connections"
+        default 1
+        range 1 4
+        help
+            Number of devices that can connect to the portal AP at the same
+            time. 1 is recommended — there is no reason for multiple devices
+            to configure the relay simultaneously.
+
+    config PORTAL_TIMEOUT_SEC
+        int "Portal auto-close timeout in seconds (0 = never)"
+        default 180
+        range 0 3600
+        help
+            Seconds after boot before the portal automatically closes and the
+            device reboots. If no credentials were entered, the device will
+            just reboot back into portal mode again.
+
+            0 disables the timeout — the portal stays open indefinitely.
+            Useful for development; not recommended for deployment.
+
+    config PORTAL_HTTP_PORT
+        int "Portal HTTP server port"
+        default 80
+        range 1 65535
+        help
+            TCP port the portal HTTP server listens on. 80 is required for
+            captive portal detection to work correctly on iOS and Android.
+
+endmenu

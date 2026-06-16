@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Device Setup</title>
+<style>
+  :root{--bg:#0f1117;--card:#1a1d27;--border:#2a2d3e;--accent:#2e5998;
+    --accent-h:#3a6cc7;--text:#e2e8f0;--muted:#8892a4;--err:#e53e3e;
+    --ok:#38a169;--inp:#12151e;--rad:8px}
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--bg);color:var(--text);font-family:-apple-system,
+    BlinkMacSystemFont,'Segoe UI',sans-serif;min-height:100vh;display:flex;
+    align-items:center;justify-content:center;padding:16px}
+  .card{background:var(--card);border:1px solid var(--border);border-radius:12px;
+    padding:32px 28px;width:100%;max-width:440px}
+  .logo{display:flex;align-items:center;gap:10px;margin-bottom:24px}
+  .logo svg{flex-shrink:0}
+  .logo-text h1{font-size:16px;font-weight:600;color:var(--text)}
+  .logo-text p{font-size:12px;color:var(--muted);margin-top:2px}
+  h2{font-size:13px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;
+    color:var(--muted);margin:20px 0 12px;padding-bottom:6px;
+    border-bottom:1px solid var(--border)}
+  h2:first-of-type{margin-top:0}
+  .field{margin-bottom:14px}
+  label{display:block;font-size:13px;color:var(--muted);margin-bottom:5px}
+  .inp-wrap{position:relative}
+  input,select{width:100%;background:var(--inp);border:1px solid var(--border);
+    border-radius:var(--rad);color:var(--text);font-size:14px;padding:9px 12px;
+    outline:none;transition:border .15s}
+  input:focus,select:focus{border-color:var(--accent)}
+  select option{background:var(--inp)}
+  .pw-toggle{position:absolute;right:10px;top:50%;transform:translateY(-50%);
+    background:none;border:none;color:var(--muted);cursor:pointer;font-size:13px;
+    padding:2px 4px}
+  .pw-toggle:hover{color:var(--text)}
+  .row{display:grid;grid-template-columns:1fr 90px;gap:10px}
+  .btn{width:100%;background:var(--accent);border:none;border-radius:var(--rad);
+    color:#fff;cursor:pointer;font-size:14px;font-weight:600;padding:11px;
+    margin-top:20px;transition:background .15s}
+  .btn:hover:not(:disabled){background:var(--accent-h)}
+  .btn:disabled{opacity:.5;cursor:not-allowed}
+  .msg{border-radius:var(--rad);font-size:13px;padding:10px 14px;margin-top:14px;
+    display:none}
+  .msg.err{background:#2d1117;border:1px solid var(--err);color:var(--err)}
+  .msg.ok{background:#0d2116;border:1px solid var(--ok);color:var(--ok)}
+  .scan-btn{background:none;border:1px solid var(--border);border-radius:var(--rad);
+    color:var(--muted);cursor:pointer;font-size:12px;padding:4px 10px;float:right;
+    margin-top:-2px;transition:border .15s}
+  .scan-btn:hover{border-color:var(--accent);color:var(--text)}
+  .spinner{display:inline-block;width:11px;height:11px;border:2px solid var(--muted);
+    border-top-color:var(--accent);border-radius:50%;animation:spin .7s linear infinite}
+  @keyframes spin{to{transform:rotate(360deg)}}
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="logo">
+    <svg width="36" height="36" viewBox="0 0 36 36" fill="none">
+      <rect width="36" height="36" rx="8" fill="#2E5998"/>
+      <path d="M10 22 L18 11 L26 22" stroke="white" stroke-width="2.2"
+        stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+      <circle cx="18" cy="25" r="2.2" fill="white"/>
+    </svg>
+    <div class="logo-text">
+      <h1>Device Setup</h1>
+      <p>Configure network credentials</p>
+    </div>
+  </div>
+
+  <!-- WiFi -->
+  <h2>
+    WiFi Network
+    <button class="scan-btn" id="scanBtn" onclick="scanNetworks()">Scan</button>
+  </h2>
+
+  <div class="field">
+    <label for="ssid">Network (SSID)</label>
+    <select id="ssid" onchange="handleSsidChange()">
+      <option value="">-- press Scan to search --</option>
+      <option value="__manual__">Enter manually…</option>
+    </select>
+  </div>
+  <div class="field" id="manualSsidField" style="display:none">
+    <label for="ssidManual">SSID (manual entry)</label>
+    <input type="text" id="ssidManual" maxlength="32" placeholder="Network name">
+  </div>
+  <div class="field">
+    <label for="wifiPass">Password</label>
+    <div class="inp-wrap">
+      <input type="password" id="wifiPass" maxlength="64" placeholder="Leave blank for open networks">
+      <button class="pw-toggle" onclick="togglePw('wifiPass',this)" tabindex="-1">Show</button>
+    </div>
+  </div>
+
+  <!-- MQTT -->
+  <h2>MQTT Broker</h2>
+
+  <div class="field">
+    <label for="mqttUrl">Broker URL</label>
+    <input type="text" id="mqttUrl" placeholder="your-cluster.hivemq.cloud" maxlength="128">
+  </div>
+  <div class="field">
+    <label>Port</label>
+    <div class="row">
+      <input type="number" id="mqttPort" value="8883" min="1" max="65535">
+      <select id="mqttPortPreset" onchange="applyPortPreset()">
+        <option value="8883">8883 TLS</option>
+        <option value="1883">1883 Plain</option>
+        <option value="">Custom</option>
+      </select>
+    </div>
+  </div>
+  <div class="field">
+    <label for="mqttUser">Username</label>
+    <input type="text" id="mqttUser" maxlength="64" placeholder="optional">
+  </div>
+  <div class="field">
+    <label for="mqttPass">Password</label>
+    <div class="inp-wrap">
+      <input type="password" id="mqttPass" maxlength="64" placeholder="optional">
+      <button class="pw-toggle" onclick="togglePw('mqttPass',this)" tabindex="-1">Show</button>
+    </div>
+  </div>
+
+  <button class="btn" id="submitBtn" onclick="submit()">Save &amp; Reboot</button>
+  <div class="msg err" id="errMsg"></div>
+  <div class="msg ok"  id="okMsg"></div>
+</div>
+
+<script>
+function togglePw(id, btn) {
+  const el = document.getElementById(id);
+  const show = el.type === 'password';
+  el.type = show ? 'text' : 'password';
+  btn.textContent = show ? 'Hide' : 'Show';
+}
+
+function applyPortPreset() {
+  const v = document.getElementById('mqttPortPreset').value;
+  if (v) document.getElementById('mqttPort').value = v;
+}
+
+function handleSsidChange() {
+  const v = document.getElementById('ssid').value;
+  document.getElementById('manualSsidField').style.display =
+    v === '__manual__' ? 'block' : 'none';
+}
+
+async function scanNetworks() {
+  const btn = document.getElementById('scanBtn');
+  btn.innerHTML = '<span class="spinner"></span>';
+  btn.disabled = true;
+  try {
+    const res = await fetch('/api/scan');
+    const nets = await res.json();
+    const sel = document.getElementById('ssid');
+    sel.innerHTML = '<option value="">-- select a network --</option>';
+    nets.sort((a, b) => b.rssi - a.rssi).forEach(n => {
+      const opt = document.createElement('option');
+      opt.value = n.ssid;
+      opt.textContent = n.ssid + (n.auth ? ' 🔒' : '') +
+                        '  (' + n.rssi + ' dBm)';
+      sel.appendChild(opt);
+    });
+    const manual = document.createElement('option');
+    manual.value = '__manual__'; manual.textContent = 'Enter manually…';
+    sel.appendChild(manual);
+  } catch (e) {
+    showErr('Scan failed — check device is in AP mode');
+  }
+  btn.textContent = 'Scan'; btn.disabled = false;
+}
+
+function showErr(msg) {
+  const el = document.getElementById('errMsg');
+  el.textContent = msg; el.style.display = 'block';
+  document.getElementById('okMsg').style.display = 'none';
+}
+function showOk(msg) {
+  const el = document.getElementById('okMsg');
+  el.textContent = msg; el.style.display = 'block';
+  document.getElementById('errMsg').style.display = 'none';
+}
+
+async function submit() {
+  document.getElementById('errMsg').style.display = 'none';
+  document.getElementById('okMsg').style.display  = 'none';
+
+  const ssidSel = document.getElementById('ssid').value;
+  const ssid = ssidSel === '__manual__'
+    ? document.getElementById('ssidManual').value.trim()
+    : ssidSel;
+
+  if (!ssid) { showErr('Please select or enter a WiFi network'); return; }
+
+  const mqttUrl  = document.getElementById('mqttUrl').value.trim();
+  const mqttPort = parseInt(document.getElementById('mqttPort').value, 10);
+  if (!mqttUrl)               { showErr('MQTT Broker URL is required'); return; }
+  if (mqttPort < 1 || mqttPort > 65535) { showErr('Invalid MQTT port'); return; }
+
+  const payload = {
+    wifi_ssid:  ssid,
+    wifi_pass:  document.getElementById('wifiPass').value,
+    mqtt_url:   mqttUrl,
+    mqtt_port:  mqttPort,
+    mqtt_user:  document.getElementById('mqttUser').value.trim(),
+    mqtt_pass:  document.getElementById('mqttPass').value,
+  };
+
+  const btn = document.getElementById('submitBtn');
+  btn.disabled = true;
+  btn.textContent = 'Saving…';
+
+  try {
+    const res = await fetch('/api/provision', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const data = await res.json();
+    if (res.ok) {
+      showOk('✓ ' + data.message);
+      btn.textContent = 'Rebooting…';
+    } else {
+      showErr(data.error || 'Unknown error');
+      btn.disabled = false; btn.textContent = 'Save & Reboot';
+    }
+  } catch (e) {
+    showErr('Request failed — device may have rebooted');
+    btn.disabled = false; btn.textContent = 'Save & Reboot';
+  }
+}
+</script>
+</body>
+</html>

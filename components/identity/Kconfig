@@ -1,0 +1,50 @@
+menu "Identity Obfuscation"
+
+    config OPSEC_IDENTITY_SPOOF_MAC
+        bool "Spoof WiFi station MAC address"
+        default y if WOL_PROFILE_HARDENED
+        default n
+        help
+            Derives a locally-administered MAC address from the chip's
+            burned-in eFuse base MAC using esp_derive_local_mac().
+
+            The resulting MAC has bit 1 of the first octet set (locally
+            administered bit) and does NOT resolve to Espressif in any
+            OUI lookup table. This prevents passive network scanners from
+            fingerprinting the device as an ESP32.
+
+            Note: esp_wifi_set_mac() must be called while the WiFi driver
+            is in INIT state (before esp_wifi_start()). The identity
+            component handles this ordering automatically.
+
+            Note: Cannot be enabled on ESP32-S2 and some C-series chips
+            where the MAC is derived differently. Check your target's
+            documentation if the build fails with ESP_ERR_NOT_SUPPORTED.
+
+    config OPSEC_IDENTITY_FAKE_HOSTNAME
+        bool "Use obfuscated DHCP hostname"
+        default y if WOL_PROFILE_HARDENED
+        default n
+        help
+            Replaces the default DHCP hostname (which contains "espressif"
+            or "esp32") with a plausible consumer-device string derived
+            from a hash of the chip MAC.
+
+            Format: <PREFIX><6-char-hex-suffix>
+            Example: "NETGEAR-A3F19C"
+
+            The prefix is set by OPSEC_IDENTITY_HOSTNAME_PREFIX below.
+
+    config OPSEC_IDENTITY_HOSTNAME_PREFIX
+        string "Fake hostname prefix"
+        default "NETGEAR-"
+        depends on OPSEC_IDENTITY_FAKE_HOSTNAME
+        help
+            The prefix prepended to the 6-character hex MAC hash suffix.
+            Choose something plausible for your network environment
+            (e.g. "TP-LINK-", "DLINK-", "HUAWEI-").
+
+            Keep it under 16 characters so the full hostname stays within
+            the 32-character DHCP hostname limit.
+
+endmenu

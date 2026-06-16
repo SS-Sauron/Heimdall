@@ -1,0 +1,86 @@
+# =============================================================================
+# wol_relay — sdkconfig.defaults
+# Applied automatically on first build when no sdkconfig file exists yet.
+# Users can override anything here via:  idf.py menuconfig
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Target & Flash
+# Change CONFIG_IDF_TARGET if building for ESP32-S3, ESP32-C3, etc.
+# -----------------------------------------------------------------------------
+CONFIG_IDF_TARGET="esp32"
+CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
+CONFIG_ESPTOOLPY_FLASHMODE_DIO=y
+CONFIG_ESPTOOLPY_FLASHFREQ_80M=y
+
+# -----------------------------------------------------------------------------
+# Partition Table
+# Points to our custom partitions.csv at project root.
+# -----------------------------------------------------------------------------
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
+CONFIG_PARTITION_TABLE_OFFSET=0x8000
+
+# -----------------------------------------------------------------------------
+# FreeRTOS
+# 1000 Hz tick gives ms-precision for TOTP window checking.
+# -----------------------------------------------------------------------------
+CONFIG_FREERTOS_HZ=1000
+CONFIG_FREERTOS_TASK_FUNCTION_WRAPPER=n
+
+# -----------------------------------------------------------------------------
+# Logging
+# INFO in standard builds; change to DEBUG during development.
+# -----------------------------------------------------------------------------
+CONFIG_LOG_DEFAULT_LEVEL_INFO=y
+CONFIG_LOG_MAXIMUM_LEVEL_DEBUG=y
+
+# -----------------------------------------------------------------------------
+# WiFi
+# Reasonable buffer defaults for a single-connection relay device.
+# -----------------------------------------------------------------------------
+CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM=6
+CONFIG_ESP_WIFI_DYNAMIC_RX_BUFFER_NUM=16
+CONFIG_ESP_WIFI_TX_BUFFER_TYPE_DYNAMIC=y
+# Disable WiFi NVS storage — we manage credentials ourselves in the
+# storage component so we control the NVS namespace and key names.
+CONFIG_ESP_WIFI_NVS_ENABLED=n
+
+# -----------------------------------------------------------------------------
+# MQTT (esp-mqtt native component)
+# -----------------------------------------------------------------------------
+CONFIG_MQTT_PROTOCOL_311=y
+CONFIG_MQTT_TRANSPORT_SSL=y
+CONFIG_MQTT_TRANSPORT_WEBSOCKET=n
+CONFIG_MQTT_TRANSPORT_WEBSOCKET_SECURE=n
+CONFIG_MQTT_SKIP_PUBLISH_IF_DISCONNECTED=n
+CONFIG_MQTT_OUTBOX_EXPIRED_TIMEOUT_MS=30000
+
+# -----------------------------------------------------------------------------
+# mDNS — disabled by default
+# A relay device has no reason to advertise services on the LAN.
+# Re-enable in menuconfig only if you need local hostname resolution
+# for debugging.
+# -----------------------------------------------------------------------------
+CONFIG_MDNS_MAX_SERVICES=0
+CONFIG_MDNS_TIMER_PERIOD_MS=0
+
+# -----------------------------------------------------------------------------
+# Bootloader
+# Log level set to WARN to minimise serial output on production devices.
+# Set to INFO or DEBUG for development.
+# -----------------------------------------------------------------------------
+CONFIG_BOOTLOADER_LOG_LEVEL_WARN=y
+
+# -----------------------------------------------------------------------------
+# OTA
+# Enable rollback so a failed firmware update reverts to the previous slot.
+# -----------------------------------------------------------------------------
+CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y
+
+# -----------------------------------------------------------------------------
+# WoL Relay build profile (defined in main/Kconfig.projbuild)
+# STANDARD = plug-and-play defaults, no OPSEC compile-time features.
+# Change to CONFIG_WOL_PROFILE_HARDENED=y for the security build.
+# -----------------------------------------------------------------------------
+CONFIG_WOL_PROFILE_STANDARD=y

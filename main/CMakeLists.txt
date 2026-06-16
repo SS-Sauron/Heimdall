@@ -1,0 +1,20 @@
+idf_component_register(
+    SRCS
+        "main.c"
+    INCLUDE_DIRS
+        "."
+    REQUIRES
+        nvs_flash
+        esp_event
+        esp_netif
+        esp_wifi
+        driver
+        identity
+        storage
+        portal
+        wifi_sta
+        mqtt_relay
+        wol
+        opsec
+        esp_driver_gpio
+)

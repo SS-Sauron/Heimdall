@@ -1,0 +1,17 @@
+menu "Storage"
+
+    config STORAGE_NVS_NAMESPACE
+        string "NVS namespace"
+        default "wol"
+        help
+            The NVS namespace used to store all device credentials.
+            Keep this short (max 15 chars). For an OPSEC-conscious
+            deployment you may change this to a non-descriptive string
+            (e.g. "d" or "cfg") so the namespace name gives no hint
+            about the device's purpose to someone reading raw flash.
+
+            Note: If you change this after devices have been provisioned
+            the existing credentials become inaccessible (different
+            namespace). Factory reset will be required.
+
+endmenu

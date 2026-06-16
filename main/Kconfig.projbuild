@@ -1,0 +1,98 @@
+# =============================================================================
+# main/Kconfig.projbuild
+#
+# Options defined here appear at the TOP LEVEL of `idf.py menuconfig`
+# (not buried under "Component configuration"). This is the right place
+# for project-wide feature gates that control multiple components.
+#
+# Reference: ESP-IDF build system docs — Kconfig.projbuild
+# =============================================================================
+
+menu "WoL Relay"
+
+    # -------------------------------------------------------------------------
+    # Build profile — the single switch that sets all defaults below.
+    # Individual options can still be overridden in menuconfig after choosing
+    # a profile; the profile just sets sane starting defaults.
+    # -------------------------------------------------------------------------
+    choice WOL_BUILD_PROFILE
+        prompt "Build profile"
+        default WOL_PROFILE_STANDARD
+        help
+            Selects the feature set compiled into the firmware.
+
+            STANDARD:  Plug-and-play. Public MQTT broker over TLS,
+                       MAC-in-payload dispatch, HMAC-derived topic,
+                       captive portal for first-boot configuration.
+                       No OPSEC compile-time features. Suitable for
+                       publishing pre-built binaries via ESP Web Tools.
+
+            HARDENED:  All OPSEC features enabled at compile time:
+                       MAC spoofing, obfuscated DHCP hostname, TOTP-
+                       signed payloads, HMAC topic derivation, response
+                       channel confirmation.  Requires building from
+                       source and managing your own signing keys.
+
+            CUSTOM:    All features off by default. Configure each
+                       option individually via menuconfig. For advanced
+                       users who want a specific combination.
+
+        config WOL_PROFILE_STANDARD
+            bool "Standard (plug-and-play)"
+
+        config WOL_PROFILE_HARDENED
+            bool "Hardened (all OPSEC features)"
+
+        config WOL_PROFILE_CUSTOM
+            bool "Custom (configure manually)"
+
+    endchoice
+
+    # -------------------------------------------------------------------------
+    # Factory reset gesture
+    # Long-press duration for the BOOT button to trigger NVS wipe + reboot
+    # into portal mode. Prevents accidental reset.
+    # -------------------------------------------------------------------------
+    config WOL_FACTORY_RESET_HOLD_MS
+        int "Factory reset hold duration (ms)"
+        default 5000
+        range 2000 15000
+        help
+            How long (in milliseconds) the BOOT button must be held to
+            trigger a factory reset. 5000 ms = 5 seconds.
+            The device wipes all NVS credentials and reboots into
+            captive portal mode.
+
+    # -------------------------------------------------------------------------
+    # Response channel
+    # Publish a confirmation MQTT message after each Magic Packet is sent.
+    # This closes the feedback loop — the trigger script knows the relay
+    # received and acted on the command.
+    # -------------------------------------------------------------------------
+    config WOL_RESPONSE_CHANNEL
+        bool "Enable MQTT response channel"
+        default y
+        help
+            When enabled, the ESP32 publishes a confirmation message to a
+            separate response topic every time it broadcasts a Magic Packet.
+            The response includes the target MAC address, a timestamp, and
+            a status code.
+
+            The response topic is derived the same way as the command topic
+            (HMAC if OPSEC is on, plain string if not).
+
+    # -------------------------------------------------------------------------
+    # Serial provisioning output
+    # Print portal password and HMAC topic to serial on first boot.
+    # Should be disabled for any device leaving your physical possession.
+    # -------------------------------------------------------------------------
+    config WOL_SERIAL_PROVISION_INFO
+        bool "Print provisioning info to serial console on first boot"
+        default y
+        help
+            Prints the portal AP password (and HMAC topic if hardened build)
+            to the serial console during first boot. Useful for initial setup.
+            Disable this option before distributing devices to others or
+            deploying in shared physical spaces.
+
+endmenu
