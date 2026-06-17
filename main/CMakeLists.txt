@@ -17,4 +17,5 @@ idf_component_register(
         wol
         opsec
         esp_driver_gpio
+        espressif__mdns
 )

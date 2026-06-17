@@ -20,6 +20,8 @@
 #include "freertos/event_groups.h"
 #include "esp_log.h"
 #include "esp_err.h"
+#include "esp_wifi.h"
+#include "esp_heap_caps.h"
 #include "mqtt_client.h" /* esp-mqtt native component */
 #include "storage.h"
 #include "wol.h"
@@ -28,6 +30,7 @@
 #include "sdkconfig.h"
 #include "esp_timer.h"
 #include "esp_ota_ops.h"
+#include "esp_crt_bundle.h"
 
 static const char *TAG = "mqtt_relay";
 
@@ -52,14 +55,29 @@ static void publish_response(const uint8_t mac[6], esp_err_t wol_result)
     if (s_client == NULL)
         return;
 
-    char payload[96];
+    /* RSSI: read from the current AP record; fall back to 0 on error */
+    int8_t rssi = 0;
+    wifi_ap_record_t ap_info;
+    if (esp_wifi_sta_get_ap_info(&ap_info) == ESP_OK) {
+        rssi = ap_info.rssi;
+    }
+
+    /* Heap and uptime diagnostics */
+    uint32_t heap_free      = esp_get_free_heap_size();
+    int64_t  uptime_s       = esp_timer_get_time() / 1000000LL;
+
+    char payload[160];
     snprintf(payload, sizeof(payload),
              "{\"mac\":\"%02X:%02X:%02X:%02X:%02X:%02X\","
              "\"status\":\"%s\","
-             "\"rssi\":%d}",
+             "\"rssi\":%d,"
+             "\"free_heap\":%" PRIu32 ","
+             "\"uptime_s\":%" PRId64 "}",
              mac[0], mac[1], mac[2], mac[3], mac[4], mac[5],
              wol_result == ESP_OK ? "sent" : "error",
-             0 /* TODO: esp_wifi_sta_get_rssi() once available */
+             (int)rssi,
+             heap_free,
+             uptime_s
     );
 
     int msg_id = esp_mqtt_client_publish(
@@ -227,7 +245,7 @@ void mqtt_relay_start(void)
                 .uri = broker_uri,
             },
             .verification = {
-                .skip_cert_common_name_check = CONFIG_MQTT_RELAY_SKIP_CERT_CN_CHECK,
+                .crt_bundle_attach = esp_crt_bundle_attach,
             },
         },
         .credentials = {

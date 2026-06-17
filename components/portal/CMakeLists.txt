@@ -14,6 +14,8 @@ idf_component_register(
         storage
         identity
         espressif__cjson
+    PRIV_REQUIRES
+        esp_timer
     EMBED_FILES
         "portal_html/index.html"
 )

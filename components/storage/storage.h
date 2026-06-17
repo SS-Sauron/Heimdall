@@ -17,6 +17,7 @@
  *   "mb"  →  MQTT password    (str, max 64 chars)
  *   "hs"  →  HMAC secret      (blob, 32 bytes)
  *   "ts"  →  TOTP seed        (blob, 20 bytes, HMAC-SHA1 for RFC 6238)
+ *   "hn"  →  custom hostname  (str, max 32 chars, RFC 1123 label)
  */
 
 #pragma once
@@ -38,6 +39,7 @@ extern "C" {
 #define STORAGE_MQTT_PASS_MAX   64
 #define STORAGE_HMAC_SECRET_LEN 32
 #define STORAGE_TOTP_SEED_LEN   20
+#define STORAGE_HOSTNAME_MAX    32  /* matches ESP_NETIF_HOSTNAME_MAX_SIZE */
 
 /* -------------------------------------------------------------------------
  * Credential bundle — passed in from the portal after the user submits the
@@ -129,6 +131,31 @@ esp_err_t storage_load_or_generate_totp_seed(uint8_t seed[STORAGE_TOTP_SEED_LEN]
  * the captive portal.
  */
 esp_err_t storage_erase_all(void);
+
+/* -------------------------------------------------------------------------
+ * Hostname
+ * ------------------------------------------------------------------------- */
+
+/**
+ * @brief Persist a user-supplied hostname string to NVS.
+ *
+ * The caller is responsible for validating the string before calling
+ * (RFC 1123 label: 1–32 chars, a-z A-Z 0-9 hyphen, no leading/trailing hyphen).
+ *
+ * @param hostname  NUL-terminated hostname string.
+ * @return ESP_OK on success.
+ */
+esp_err_t storage_save_hostname(const char *hostname);
+
+/**
+ * @brief Load a previously saved hostname from NVS.
+ *
+ * @param[out] out      Caller-allocated buffer to receive the string.
+ * @param[in]  out_len  Size of out in bytes (STORAGE_HOSTNAME_MAX + 1 recommended).
+ * @return ESP_OK on success, ESP_ERR_NVS_NOT_FOUND if never set,
+ *         other esp_err_t on genuine storage error.
+ */
+esp_err_t storage_load_hostname(char *out, size_t out_len);
 
 /**
  * @brief Initialize the factory reset button.

@@ -19,6 +19,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include <ctype.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/event_groups.h"
@@ -36,8 +37,16 @@
 #include "portal.h"
 #include "sdkconfig.h"
 #include "lwip/ip4_addr.h"
+#include "esp_timer.h"
 
 static const char *TAG = "portal";
+
+static esp_timer_handle_t s_portal_timeout_timer = NULL;
+
+static void portal_timeout_callback(void* arg) {
+    ESP_LOGE(TAG, "Portal abandoned by user (5 minute inactivity timeout) — rebooting");
+    esp_restart();
+}
 
 /* Embedded HTML (placed in firmware flash via EMBED_FILES in CMakeLists) */
 extern const char index_html_start[] asm("_binary_index_html_start");
@@ -156,6 +165,9 @@ static esp_err_t send_json(httpd_req_t *req, cJSON *root, int http_status)
 /* GET / — serve the embedded HTML form */
 static esp_err_t handle_root(httpd_req_t *req)
 {
+    if (s_portal_timeout_timer != NULL) {
+        esp_timer_restart(s_portal_timeout_timer, 300ULL * 1000000ULL);
+    }
     size_t html_len = (size_t)(index_html_end - index_html_start);
     httpd_resp_set_type(req, "text/html");
     httpd_resp_set_hdr(req, "Cache-Control", "no-store");
@@ -230,6 +242,27 @@ static esp_err_t handle_scan(httpd_req_t *req)
     return ret;
 }
 
+/* --------------------------------------------------------------------------
+ * Broker URL sanitisation
+ *
+ * Strips any scheme prefix that esp-mqtt adds itself at connect time.
+ * The NVS field holds only the bare hostname (or IP); the scheme is
+ * determined separately by the mqtt_relay component based on the port.
+ * -------------------------------------------------------------------------- */
+static const char *sanitize_broker_url(const char *url)
+{
+    static const char *const prefixes[] = {
+        "mqtt://", "mqtts://", "tcp://", "ssl://", "http://", "https://", NULL
+    };
+    for (int i = 0; prefixes[i] != NULL; i++) {
+        size_t len = strlen(prefixes[i]);
+        if (strncasecmp(url, prefixes[i], len) == 0) {
+            return url + len; /* pointer into caller's buffer — no allocation */
+        }
+    }
+    return url; /* no recognised prefix — return as-is */
+}
+
 /* POST /api/provision — parse, validate, save credentials, trigger reboot */
 static esp_err_t handle_provision(httpd_req_t *req)
 {
@@ -299,7 +332,12 @@ static esp_err_t handle_provision(httpd_req_t *req)
         cJSON_Delete(err);
         return r;
     }
-    strncpy(creds.mqtt_url, j->valuestring, STORAGE_MQTT_URL_MAX);
+    const char *clean_url = sanitize_broker_url(j->valuestring);
+    if (clean_url != j->valuestring) {
+        ESP_LOGI(TAG, "Stripped scheme prefix from broker URL: '%s' → '%s'",
+                 j->valuestring, clean_url);
+    }
+    strncpy(creds.mqtt_url, clean_url, STORAGE_MQTT_URL_MAX);
 
     j = cJSON_GetObjectItem(json, "mqtt_port");
     creds.mqtt_port = cJSON_IsNumber(j) ? (uint16_t)j->valuedouble : 8883;
@@ -312,7 +350,44 @@ static esp_err_t handle_provision(httpd_req_t *req)
     if (cJSON_IsString(j))
         strncpy(creds.mqtt_pass, j->valuestring, STORAGE_MQTT_PASS_MAX);
 
+    /* Optional hostname field — validate if present, reject with 400 if invalid */
+    char validated_hostname[STORAGE_HOSTNAME_MAX + 1] = {0};
+    bool hostname_provided = false;
+    j = cJSON_GetObjectItem(json, "hostname");
+    if (cJSON_IsString(j) && strlen(j->valuestring) > 0) {
+        const char *hn = j->valuestring;
+        size_t hn_len = strlen(hn);
+        bool valid = (hn_len >= 1 && hn_len <= STORAGE_HOSTNAME_MAX);
+        if (valid && (hn[0] == '-' || hn[hn_len - 1] == '-'))
+            valid = false;
+        if (valid) {
+            for (size_t i = 0; i < hn_len && valid; i++) {
+                char c = hn[i];
+                if (!isalnum((unsigned char)c) && c != '-')
+                    valid = false;
+            }
+        }
+        if (!valid) {
+            cJSON_Delete(json);
+            cJSON *err = cJSON_CreateObject();
+            cJSON_AddStringToObject(err, "error",
+                "Invalid hostname: 1–32 chars, a-z/A-Z/0-9/hyphen, "
+                "must not start or end with a hyphen");
+            esp_err_t r = send_json(req, err, 400);
+            cJSON_Delete(err);
+            return r;
+        }
+        strncpy(validated_hostname, hn, STORAGE_HOSTNAME_MAX);
+        hostname_provided = true;
+    }
+
     cJSON_Delete(json);
+
+    if (s_portal_timeout_timer != NULL) {
+        esp_timer_stop(s_portal_timeout_timer);
+        esp_timer_delete(s_portal_timeout_timer);
+        s_portal_timeout_timer = NULL;
+    }
 
     /* Save and signal the main portal task */
     esp_err_t save_err = storage_save_credentials(&creds);
@@ -323,6 +398,15 @@ static esp_err_t handle_provision(httpd_req_t *req)
         esp_err_t r = send_json(req, err_obj, 400);
         cJSON_Delete(err_obj);
         return r;
+    }
+
+    /* Save hostname if the user provided one (optional) */
+    if (hostname_provided) {
+        esp_err_t hn_err = storage_save_hostname(validated_hostname);
+        if (hn_err != ESP_OK) {
+            ESP_LOGW(TAG, "Hostname save failed (%s) — device will use default",
+                     esp_err_to_name(hn_err));
+        }
     }
 
 #if CONFIG_OPSEC_HMAC_TOPIC || CONFIG_OPSEC_TOTP
@@ -398,7 +482,7 @@ static httpd_handle_t start_http_server(void)
         {.uri = "/connecttest.txt", .method = HTTP_GET, .handler = handle_captive_redirect},
         {.uri = "/redirect", .method = HTTP_GET, .handler = handle_captive_redirect},
         /* Wildcard catch-all — must be last */
-        {.uri = "/*", .method = HTTP_GET, .handler = handle_captive_redirect},
+        {.uri = "/*", .method = HTTP_ANY, .handler = handle_captive_redirect},
     };
 
     for (size_t i = 0; i < sizeof(uris) / sizeof(uris[0]); i++)
@@ -432,6 +516,15 @@ void portal_start(void)
     s_portal_events = xEventGroupCreate();
     configASSERT(s_portal_events);
 
+    const esp_timer_create_args_t timer_args = {
+        .callback = &portal_timeout_callback,
+        .name = "portal_watchdog"
+    };
+
+    if (esp_timer_create(&timer_args, &s_portal_timeout_timer) == ESP_OK) {
+        esp_timer_start_once(s_portal_timeout_timer, 300ULL * 1000000ULL);
+    }
+
     start_softap(ssid, pass);
 
     /* Start DNS redirect so all DNS queries go to the ESP32 */
@@ -445,30 +538,17 @@ void portal_start(void)
     ESP_LOGI(TAG, "Portal ready — waiting for credentials");
 
     /* -----------------------------------------------------------------
-     * Block until either:
-     *   a) User submits valid credentials (PORTAL_CRED_SAVED_BIT set)
-     *   b) Timeout expires (CONFIG_PORTAL_TIMEOUT_SEC, 0 = wait forever)
+     * Block indefinitely. The portal_watchdog timer handles inactivity timeouts,
+     * while PORTAL_CRED_SAVED_BIT signals a successful submission.
      * ----------------------------------------------------------------- */
-    TickType_t timeout_ticks = (CONFIG_PORTAL_TIMEOUT_SEC > 0)
-                                   ? pdMS_TO_TICKS((uint32_t)CONFIG_PORTAL_TIMEOUT_SEC * 1000)
-                                   : portMAX_DELAY;
-
-    EventBits_t bits = xEventGroupWaitBits(
+    xEventGroupWaitBits(
         s_portal_events,
         PORTAL_CRED_SAVED_BIT,
         pdFALSE, /* don't clear on exit */
         pdFALSE, /* any bit */
-        timeout_ticks);
+        portMAX_DELAY);
 
-    if (bits & PORTAL_CRED_SAVED_BIT)
-    {
-        ESP_LOGI(TAG, "Credentials saved — rebooting into relay mode");
-    }
-    else
-    {
-        ESP_LOGW(TAG, "Portal timed out after %d s — rebooting",
-                 CONFIG_PORTAL_TIMEOUT_SEC);
-    }
+    ESP_LOGI(TAG, "Credentials saved — rebooting into relay mode");
 
     /* Give the HTTP response a moment to flush before restarting */
     vTaskDelay(pdMS_TO_TICKS(500));

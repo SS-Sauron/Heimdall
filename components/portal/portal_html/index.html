@@ -123,6 +123,15 @@
     </div>
   </div>
 
+  <!-- Advanced / optional -->
+  <h2>Device Hostname <span style="font-weight:400;text-transform:none;font-size:11px;color:var(--muted)">(optional)</span></h2>
+
+  <div class="field">
+    <label for="hostname">Hostname</label>
+    <input type="text" id="hostname" maxlength="32"
+           placeholder="my-relay (leave blank to keep default)">
+  </div>
+
   <button class="btn" id="submitBtn" onclick="submit()">Save &amp; Reboot</button>
   <div class="msg err" id="errMsg"></div>
   <div class="msg ok"  id="okMsg"></div>
@@ -207,6 +216,20 @@ async function submit() {
     mqtt_user:  document.getElementById('mqttUser').value.trim(),
     mqtt_pass:  document.getElementById('mqttPass').value,
   };
+
+  const hostnameRaw = document.getElementById('hostname').value.trim();
+  if (hostnameRaw.length > 0) {
+    const hnLen = hostnameRaw.length;
+    const hnOk = hnLen >= 1 && hnLen <= 32
+                 && hostnameRaw[0] !== '-'
+                 && hostnameRaw[hnLen - 1] !== '-'
+                 && /^[a-zA-Z0-9-]+$/.test(hostnameRaw);
+    if (!hnOk) {
+      showErr('Invalid hostname: 1–32 chars, letters/digits/hyphen only, must not start or end with a hyphen');
+      return;
+    }
+    payload.hostname = hostnameRaw;
+  }
 
   const btn = document.getElementById('submitBtn');
   btn.disabled = true;

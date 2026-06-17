@@ -23,22 +23,57 @@
 #include "esp_event.h"
 #include "esp_netif.h"
 #include "driver/gpio.h"
+#include "esp_system.h"
+#include "esp_attr.h"
 
 #include "identity.h"
 #include "storage.h"
 #include "portal.h"
 #include "wifi_sta.h"
 #include "mqtt_relay.h"
+#include "mdns.h"
+#include "lwip/apps/netbiosns.h"
 
 static const char *TAG = "main";
 
+RTC_NOINIT_ATTR volatile uint32_t boot_crash_counter;
 
 /* --------------------------------------------------------------------------
  * app_main — entry point called by ESP-IDF after system init
  * -------------------------------------------------------------------------- */
 void app_main(void)
 {
+    esp_reset_reason_t reason = esp_reset_reason();
+    if (reason == ESP_RST_SW || reason == ESP_RST_PANIC || 
+        reason == ESP_RST_INT_WDT || reason == ESP_RST_TASK_WDT ||
+        reason == ESP_RST_WDT) {
+        boot_crash_counter++;
+    } else {
+        /* Clean boot (e.g., power-on, external reset). Clear counter
+         * because RTC_NOINIT_ATTR memory contains garbage on cold boot. */
+        boot_crash_counter = 0;
+    }
+
     ESP_LOGI(TAG, "=== WoL Relay starting ===");
+    if (boot_crash_counter > 0) {
+        ESP_LOGW(TAG, "Continuous crash loop count: %lu", (unsigned long)boot_crash_counter);
+    }
+
+    if (boot_crash_counter >= 3) {
+        ESP_LOGE(TAG, "Crash loop detected! Engaging escape hatch — wiping NVS");
+        boot_crash_counter = 0;
+        
+        esp_err_t err = nvs_flash_erase();
+        if (err == ESP_OK) {
+            ESP_LOGW(TAG, "NVS wiped successfully. Rebooting into factory state.");
+        } else if (err == ESP_ERR_NOT_FOUND) {
+            ESP_LOGE(TAG, "NVS partition not found during wipe attempt.");
+        } else {
+            ESP_LOGE(TAG, "Failed to erase NVS: %s", esp_err_to_name(err));
+        }
+        
+        esp_restart();
+    }
 
     /* ------------------------------------------------------------------
      * Step 1: NVS flash initialisation
@@ -61,6 +96,8 @@ void app_main(void)
      * ------------------------------------------------------------------ */
     ESP_ERROR_CHECK(esp_netif_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());
+    ESP_ERROR_CHECK(mdns_init());
+    netbiosns_init();
     ESP_LOGI(TAG, "netif + event loop ready");
 
     /* ------------------------------------------------------------------

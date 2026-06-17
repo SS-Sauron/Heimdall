@@ -8,4 +8,6 @@ idf_component_register(
         esp_netif
         esp_system
         mbedtls
+        storage
+        nvs_flash
 )

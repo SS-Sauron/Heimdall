@@ -5,6 +5,7 @@ idf_component_register(
         "."
     REQUIRES
         esp_netif
+        esp_wifi
         storage
         wol
         opsec

@@ -17,6 +17,9 @@
 #include "identity.h"
 #include "wifi_sta.h"
 #include "sdkconfig.h"
+#include "esp_timer.h"
+#include "mdns.h"
+#include "lwip/apps/netbiosns.h"
 
 static const char *TAG = "wifi_sta";
 
@@ -28,6 +31,13 @@ static int s_retry_count = 0;
 static bool s_connected = false;
 static esp_netif_t *s_sta_netif = NULL;
 
+/* Timestamp (esp_timer_get_time() in µs) of the first disconnect since
+ * the last successful IP assignment. Zero means we are not in a
+ * disconnected state (or have never connected). */
+static int64_t s_disconnect_start_time = 0;
+static bool s_has_connected_once = false;
+static bool s_is_tracking_disconnect = false;
+
 /* --------------------------------------------------------------------------
  * Event handlers
  * -------------------------------------------------------------------------- */
@@ -35,6 +45,30 @@ static void on_wifi_disconnect(void *arg, esp_event_base_t base,
                                int32_t id, void *data)
 {
     s_connected = false;
+
+    /* Start the absolute-timeout clock on the first disconnect */
+    if (!s_is_tracking_disconnect) {
+        s_disconnect_start_time = esp_timer_get_time();
+        s_is_tracking_disconnect = true;
+        ESP_LOGW(TAG, "Absolute timeout clock started");
+    }
+
+    /* Slow path: if we have been continuously disconnected for longer than
+     * CONFIG_WIFI_STA_ABSOLUTE_TIMEOUT_MINUTES, the SSID is probably wrong.
+     * Erase credentials and reboot into the provisioning portal. */
+    if (!s_has_connected_once) {
+        const uint64_t ceiling_us = (uint64_t)CONFIG_WIFI_STA_ABSOLUTE_TIMEOUT_MINUTES * 60ULL * 1000000ULL;
+        if ((uint64_t)(esp_timer_get_time() - s_disconnect_start_time) >= ceiling_us) {
+            ESP_LOGE(TAG,
+                     "Absolute timeout (%d min) exceeded — erasing credentials "
+                     "and rebooting into portal",
+                     CONFIG_WIFI_STA_ABSOLUTE_TIMEOUT_MINUTES);
+            xEventGroupSetBits(s_wifi_events, STA_FAIL_BIT);
+            storage_erase_all();
+            esp_restart();
+            /* unreachable */
+        }
+    }
 
     /* FIX 3 + NEW PROBLEM 3: read the disconnect reason from event data */
     wifi_event_sta_disconnected_t *disc = (wifi_event_sta_disconnected_t *)data;
@@ -81,6 +115,8 @@ static void on_got_ip(void *arg, esp_event_base_t base,
     ESP_LOGI(TAG, "Got IP: " IPSTR, IP2STR(&event->ip_info.ip));
     s_retry_count = 0;
     s_connected = true;
+    s_has_connected_once = true; // Permanently disable the absolute timeout for this boot session
+    s_is_tracking_disconnect = false; // Reset the disconnect tracker
     xEventGroupSetBits(s_wifi_events, STA_CONNECTED_BIT);
 }
 
@@ -118,6 +154,8 @@ esp_err_t wifi_sta_connect(void)
     char hostname[33];
     identity_get_hostname(hostname, sizeof(hostname));
     esp_netif_set_hostname(s_sta_netif, hostname);
+    mdns_hostname_set(hostname);
+    netbiosns_set_name(hostname);
 
     /* Initialise WiFi driver if identity.c hasn't already done so */
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
@@ -146,31 +184,29 @@ esp_err_t wifi_sta_connect(void)
     ESP_LOGI(TAG, "Connecting to SSID: %s", creds.wifi_ssid);
     esp_wifi_connect();
 
-    /* Block until connected or failed */
-    TickType_t timeout = pdMS_TO_TICKS(CONFIG_WIFI_STA_CONNECT_TIMEOUT_MS);
+    /* Block indefinitely — the slow-path absolute timeout in
+     * on_wifi_disconnect() guarantees we never hang here forever.
+     * The only exit is STA_CONNECTED_BIT (returns ESP_OK) or
+     * STA_FAIL_BIT (fast-path erase+restart, never returns). */
     EventBits_t bits = xEventGroupWaitBits(
         s_wifi_events,
         STA_CONNECTED_BIT | STA_FAIL_BIT,
         pdFALSE, pdFALSE,
-        timeout);
+        portMAX_DELAY);
 
     if (bits & STA_CONNECTED_BIT)
     {
         return ESP_OK;
     }
 
-    /* ADDITIONAL PROBLEM 2 FIX: only erase credentials on confirmed
-     * wrong-credential failure (STA_FAIL_BIT). A plain timeout means the
-     * router may be temporarily down — leave credentials intact. */
-    if (bits & STA_FAIL_BIT)
-    {
-        ESP_LOGE(TAG, "Wrong credentials confirmed — clearing NVS and rebooting");
-        storage_erase_all();
-        esp_restart();
-    }
-
-    ESP_LOGW(TAG, "Connection timed out — credentials preserved, returning error");
-    return ESP_ERR_TIMEOUT;
+    /* STA_FAIL_BIT: wrong credentials confirmed — erase and reboot.
+     * (The slow-path erases+restarts directly from the event handler;
+     * this branch handles the fast-path MAX_RETRY case.) */
+    ESP_LOGE(TAG, "Wrong credentials confirmed — clearing NVS and rebooting");
+    storage_erase_all();
+    esp_restart();
+    /* unreachable — suppress compiler warning */
+    return ESP_FAIL;
 }
 
 bool wifi_sta_is_connected(void)

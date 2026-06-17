@@ -20,12 +20,25 @@ menu "WiFi Station"
             on congested networks where rapid retries worsen the problem.
 
     config WIFI_STA_CONNECT_TIMEOUT_MS
-        int "Initial connection timeout (ms)"
+        int "Initial connection timeout (ms) [OBSOLETE — not used]"
         default 15000
         range 5000 60000
         help
-            Maximum time to wait for the first successful connection after
-            boot. If this expires, the device reboots back into portal mode
-            on the assumption that the stored credentials are wrong.
+            Formerly the maximum time to wait for the first connection.
+            No longer consulted: wifi_sta_connect() now blocks indefinitely
+            (portMAX_DELAY) and relies on the absolute timeout below to
+            force a portal fallback on permanent failures.
+
+    config WIFI_STA_ABSOLUTE_TIMEOUT_MINUTES
+        int "Absolute disconnection ceiling before portal fallback (minutes)"
+        default 20
+        range 1 120
+        help
+            Absolute time ceiling in minutes before a continuously
+            disconnected device erases credentials and restarts into
+            the provisioning portal. This guards against permanent
+            NO_AP_FOUND loops caused by an SSID typo during provisioning.
+            The timer starts on the first disconnect after boot and resets
+            to zero each time a valid IP address is obtained.
 
 endmenu

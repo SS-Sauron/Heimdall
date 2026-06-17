@@ -41,7 +41,6 @@ CONFIG_LOG_MAXIMUM_LEVEL_DEBUG=y
 # -----------------------------------------------------------------------------
 CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM=6
 CONFIG_ESP_WIFI_DYNAMIC_RX_BUFFER_NUM=16
-CONFIG_ESP_WIFI_TX_BUFFER_TYPE_DYNAMIC=y
 # Disable WiFi NVS storage — we manage credentials ourselves in the
 # storage component so we control the NVS namespace and key names.
 CONFIG_ESP_WIFI_NVS_ENABLED=n
@@ -55,15 +54,6 @@ CONFIG_MQTT_TRANSPORT_WEBSOCKET=n
 CONFIG_MQTT_TRANSPORT_WEBSOCKET_SECURE=n
 CONFIG_MQTT_SKIP_PUBLISH_IF_DISCONNECTED=n
 CONFIG_MQTT_OUTBOX_EXPIRED_TIMEOUT_MS=30000
-
-# -----------------------------------------------------------------------------
-# mDNS — disabled by default
-# A relay device has no reason to advertise services on the LAN.
-# Re-enable in menuconfig only if you need local hostname resolution
-# for debugging.
-# -----------------------------------------------------------------------------
-CONFIG_MDNS_MAX_SERVICES=0
-CONFIG_MDNS_TIMER_PERIOD_MS=0
 
 # -----------------------------------------------------------------------------
 # Bootloader

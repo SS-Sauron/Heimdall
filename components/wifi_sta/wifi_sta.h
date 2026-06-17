@@ -24,15 +24,21 @@ extern "C" {
  * creates the default STA netif, registers event handlers, and starts
  * the connection process.
  *
- * Blocks until one of:
- *   - An IP address is obtained → returns ESP_OK.
- *   - CONFIG_WIFI_STA_MAX_RETRY attempts are exhausted → clears NVS
- *     credentials and calls esp_restart() to force re-provisioning
- *     (credentials are likely wrong).
- *   - CONFIG_WIFI_STA_CONNECT_TIMEOUT_MS elapses → same as above.
+ * Blocks indefinitely (portMAX_DELAY) — it will never return on failure.
+ * Two internal mechanisms ensure the device cannot hang permanently:
  *
- * @return ESP_OK when the network is up and an IP is assigned.
- *         Does not return on fatal failure (calls esp_restart()).
+ *   Fast path  — if CONFIG_WIFI_STA_MAX_RETRY consecutive wrong-credential
+ *                disconnect reasons are observed, credentials are erased from
+ *                NVS and esp_restart() is called to force re-provisioning.
+ *
+ *   Slow path  — if the device remains continuously disconnected for longer
+ *                than CONFIG_WIFI_STA_ABSOLUTE_TIMEOUT_MINUTES (default 20 min),
+ *                credentials are erased and esp_restart() is called regardless
+ *                of the disconnect reason code. This catches permanent
+ *                NO_AP_FOUND loops caused by an SSID typo.
+ *
+ * @return ESP_OK when the network is up and an IP address is assigned.
+ *         Never returns on failure — esp_restart() is called internally.
  */
 esp_err_t wifi_sta_connect(void);
 

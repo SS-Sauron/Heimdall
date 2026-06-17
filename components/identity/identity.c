@@ -14,11 +14,14 @@
 
 #include <string.h>
 #include <stdio.h>
+#include <ctype.h>
 #include "esp_log.h"
 #include "esp_mac.h"
 #include "esp_wifi.h"
 #include "esp_netif.h"
 #include "identity.h"
+#include "storage.h"
+#include "nvs.h"
 #include "sdkconfig.h"
 
 static const char *TAG = "identity";
@@ -109,10 +112,54 @@ void identity_apply(void)
     ESP_ERROR_CHECK(esp_read_mac(base_mac, ESP_MAC_EFUSE_FACTORY));
     memcpy(s_effective_mac, base_mac, 6); /* default: use base MAC */
 
-    /* Build default hostname from base MAC before any OPSEC logic */
+    /* Build default hostname from base MAC before any OPSEC logic.
+     * This may be overwritten by NVS or fake-hostname logic below. */
     snprintf(s_effective_hostname, sizeof(s_effective_hostname),
              "esp32-%02X%02X%02X", base_mac[3], base_mac[4], base_mac[5]);
 
+    /* ------------------------------------------------------------------
+     * Precedence 1: User-set hostname from NVS (highest priority).
+     * If present and still valid, use it and skip all further hostname
+     * generation — the user's explicit choice overrides both the MAC-
+     * derived default and the HARDENED fake-hostname.
+     * ------------------------------------------------------------------ */
+    {
+        char nvs_hostname[STORAGE_HOSTNAME_MAX + 1] = {0};
+        esp_err_t hn_err = storage_load_hostname(nvs_hostname, sizeof(nvs_hostname));
+        if (hn_err == ESP_OK) {
+            /* Defence-in-depth: re-validate in case rules changed between
+             * firmware versions.  Reject if empty, too long, bad chars, or
+             * leading/trailing hyphen. */
+            size_t hn_len = strlen(nvs_hostname);
+            bool valid = (hn_len >= 1 && hn_len <= STORAGE_HOSTNAME_MAX);
+            if (valid && (nvs_hostname[0] == '-' || nvs_hostname[hn_len - 1] == '-'))
+                valid = false;
+            if (valid) {
+                for (size_t i = 0; i < hn_len && valid; i++) {
+                    char c = nvs_hostname[i];
+                    if (!isalnum((unsigned char)c) && c != '-')
+                        valid = false;
+                }
+            }
+            if (valid) {
+                strncpy(s_effective_hostname, nvs_hostname,
+                        sizeof(s_effective_hostname) - 1);
+                s_effective_hostname[sizeof(s_effective_hostname) - 1] = '\0';
+                ESP_LOGI(TAG, "Hostname loaded from NVS: %s", s_effective_hostname);
+                /* Skip fake-hostname generation — NVS value takes precedence */
+                goto apply_mac_spoof;
+            } else {
+                ESP_LOGW(TAG, "NVS hostname '%s' failed re-validation — using default",
+                         nvs_hostname);
+            }
+        } else if (hn_err != ESP_ERR_NVS_NOT_FOUND) {
+            ESP_LOGW(TAG, "storage_load_hostname error: %s — using default",
+                     esp_err_to_name(hn_err));
+        }
+        /* ESP_ERR_NVS_NOT_FOUND: fall through to default/fake-hostname logic */
+    }
+
+apply_mac_spoof:
 #if CONFIG_OPSEC_IDENTITY_SPOOF_MAC
     /*
      * MAC spoofing requires the WiFi driver to be initialised first.
@@ -123,6 +170,7 @@ void identity_apply(void)
      * point, move apply_mac_spoof() there instead and remove the init
      * call below.
      */
+    {
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
     esp_err_t init_err = esp_wifi_init(&cfg);
     if (init_err == ESP_ERR_WIFI_INIT_STATE)
@@ -135,10 +183,13 @@ void identity_apply(void)
     }
 
     apply_mac_spoof(base_mac);
+    }
 #endif
 
 #if CONFIG_OPSEC_IDENTITY_FAKE_HOSTNAME
-    /* Use the spoofed MAC (if active) as the hostname source, so the
+    /* Precedence 2: HARDENED fake hostname — only applies if no NVS hostname
+     * was loaded (the goto above skips this block when NVS value is used).
+     * Use the spoofed MAC (if active) as the hostname source, so the
      * hostname suffix matches the MAC the network actually sees. */
     apply_fake_hostname(s_effective_mac);
 #endif

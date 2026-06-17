@@ -9,4 +9,8 @@ idf_component_register(
         esp_event
         storage
         identity
+    PRIV_REQUIRES
+        esp_timer
+        espressif__mdns
+        lwip
 )

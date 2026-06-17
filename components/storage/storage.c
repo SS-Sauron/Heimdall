@@ -34,6 +34,7 @@ static const char *NS    = CONFIG_STORAGE_NVS_NAMESPACE;   /* e.g. "wol" */
 #define KEY_MQTT_PASS     "mb"
 #define KEY_HMAC_SECRET   "hs"
 #define KEY_TOTP_SEED     "ts"
+#define KEY_HOSTNAME      "hn"
 
 /* --------------------------------------------------------------------------
  * Internal helper — open the NVS namespace
@@ -217,6 +218,43 @@ esp_err_t storage_erase_all(void)
     if (err == ESP_OK) err = nvs_commit(h);
     nvs_close(h);
     ESP_LOGW(TAG, "NVS namespace \"%s\" erased", NS);
+    return err;
+}
+
+/* --------------------------------------------------------------------------
+ * Hostname
+ * -------------------------------------------------------------------------- */
+esp_err_t storage_save_hostname(const char *hostname)
+{
+    if (hostname == NULL) return ESP_ERR_INVALID_ARG;
+
+    nvs_handle_t h;
+    esp_err_t err = open_nvs(NVS_READWRITE, &h);
+    if (err != ESP_OK) return err;
+
+    err = nvs_set_str(h, KEY_HOSTNAME, hostname);
+    if (err == ESP_OK) err = nvs_commit(h);
+    nvs_close(h);
+    if (err == ESP_OK) {
+        ESP_LOGI(TAG, "Hostname saved: %s", hostname);
+    } else {
+        ESP_LOGE(TAG, "Hostname save failed: %s", esp_err_to_name(err));
+    }
+    return err;
+}
+
+esp_err_t storage_load_hostname(char *out, size_t out_len)
+{
+    if (out == NULL || out_len == 0) return ESP_ERR_INVALID_ARG;
+
+    nvs_handle_t h;
+    esp_err_t err = open_nvs(NVS_READONLY, &h);
+    if (err != ESP_OK) return err;
+
+    err = nvs_get_str(h, KEY_HOSTNAME, out, &out_len);
+    nvs_close(h);
+    /* Pass ESP_ERR_NVS_NOT_FOUND through unchanged so callers can distinguish
+     * "never set" from genuine errors. */
     return err;
 }
 
