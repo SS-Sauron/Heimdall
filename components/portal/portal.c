@@ -14,6 +14,21 @@
  *   GET  /ncsi.txt               → Windows
  *   GET  /connecttest.txt        → Windows 10+
  *   GET  /redirect               → Android fallback
+ *
+ * HTTPS interception limitation
+ * ─────────────────────────────
+ * DNS redirection alone cannot intercept HTTPS requests. When a user types
+ * a URL (e.g. "www.google.com") that the browser knows uses HTTPS, or that
+ * is on the browser's HSTS preload list, the browser connects directly to
+ * port 443. The ESP32 HTTP server on port 80 never sees the request, and
+ * DNS redirection is bypassed entirely by the TLS certificate check.
+ *
+ * DHCP Option 114 (RFC 8910) is the correct primary fix. It sends the
+ * captive portal URL to the OS during IP address assignment, before the
+ * user opens any browser. The OS performs a controlled HTTP check to a
+ * known non-HTTPS URL and automatically shows the portal notification.
+ * This is implemented in start_softap() via esp_netif_dhcps_option() with
+ * ESP_NETIF_CAPTIVEPORTAL_URI. Users should not need to type anything.
  */
 
 #include <string.h>
@@ -32,10 +47,11 @@
 #include "cJSON.h"
 #include "mbedtls/md.h"
 #include "dns_server.h"
-#include "storage.h"
 #include "identity.h"
+#include "storage.h"
 #include "portal.h"
 #include "sdkconfig.h"
+#include "opsec.h"
 #include "lwip/ip4_addr.h"
 #include "esp_timer.h"
 
@@ -115,10 +131,13 @@ static void start_softap(const char *ssid, const char *password)
     esp_netif_create_default_wifi_sta();
 
     wifi_init_config_t wifi_cfg = WIFI_INIT_CONFIG_DEFAULT();
-    /* esp_wifi_init may already have been called by identity.c — ignore
-     * ESP_ERR_WIFI_INIT_STATE in that case */
+    /* esp_wifi_init may already have been called by identity.c (MAC spoof).
+     * ESP-IDF v5 returns ESP_ERR_WIFI_INIT_STATE; v6 returns the generic
+     * ESP_ERR_INVALID_STATE — treat both as "already initialised, skip". */
     esp_err_t init_err = esp_wifi_init(&wifi_cfg);
-    if (init_err != ESP_OK && init_err != ESP_ERR_WIFI_INIT_STATE)
+    if (init_err != ESP_OK &&
+        init_err != ESP_ERR_WIFI_INIT_STATE &&
+        init_err != ESP_ERR_INVALID_STATE)
     {
         ESP_ERROR_CHECK(init_err);
     }
@@ -138,10 +157,37 @@ static void start_softap(const char *ssid, const char *password)
 
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_APSTA));
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP, &ap_config));
+    /* Spoof the AP MAC to avoid leaking the Espressif OUI in beacon frames.
+     * identity_spoof_ap_mac() is a no-op in STANDARD builds. */
+    ESP_ERROR_CHECK(identity_spoof_ap_mac());
     ESP_ERROR_CHECK(esp_wifi_start());
 
-    ESP_LOGI(TAG, "SoftAP started  SSID: %s  Auth: %s",
-             ssid, password[0] ? "WPA2" : "OPEN");
+    /* DHCP Option 114 (RFC 8910): captive portal URI — Fix 1.
+     *
+     * Advertised to connecting clients during IP address assignment, before
+     * the user opens any browser. The OS performs a controlled HTTP check
+     * to this URL and automatically shows the portal notification. This is
+     * the primary detection mechanism for Chrome and Android, which do not
+     * rely on DNS interception alone.
+     *
+     * The stop/set/start sequence is required: DHCP server options must be
+     * configured while the server is not running. esp_netif_create_default_
+     * wifi_ap() starts the server automatically, so we stop it, set the
+     * option, then restart.
+     *
+     * API: esp_netif_dhcps_option(netif, ESP_NETIF_OP_SET,
+     *                             ESP_NETIF_CAPTIVEPORTAL_URI, url, len)
+     * Confirmed against ESP-IDF v6.0.1 docs. */
+    const char *captive_url = "http://" SOFTAP_IP "/";
+    ESP_ERROR_CHECK_WITHOUT_ABORT(esp_netif_dhcps_stop(s_ap_netif));
+    ESP_ERROR_CHECK(esp_netif_dhcps_option(s_ap_netif, ESP_NETIF_OP_SET,
+                                           ESP_NETIF_CAPTIVEPORTAL_URI,
+                                           (void *)captive_url,
+                                           (uint32_t)strlen(captive_url)));
+    ESP_ERROR_CHECK_WITHOUT_ABORT(esp_netif_dhcps_start(s_ap_netif));
+
+    ESP_LOGI(TAG, "SoftAP started  SSID: %s  Auth: %s  DHCP opt-114: %s",
+             ssid, password[0] ? "WPA2" : "OPEN", captive_url);
 }
 
 /* --------------------------------------------------------------------------
@@ -262,6 +308,53 @@ static const char *sanitize_broker_url(const char *url)
     }
     return url; /* no recognised prefix — return as-is */
 }
+#if CONFIG_OPSEC_TOTP
+/* --------------------------------------------------------------------------
+ * Base32 encoder (RFC 4648, uppercase alphabet, no padding)
+ *
+ * Converts an arbitrary byte array to a null-terminated Base32 string.
+ * For a 20-byte TOTP seed the output is exactly 32 characters.
+ *
+ * Parameters:
+ *   in      — pointer to input byte array
+ *   in_len  — number of bytes to encode
+ *   out     — caller-provided output buffer
+ *   out_len — size of output buffer (must be >= ceil(in_len*8/5)+1)
+ *
+ * The output is always null-terminated. If the buffer is too small the
+ * result is silently truncated (the null terminator is always written).
+ * -------------------------------------------------------------------------- */
+static void bytes_to_base32(const uint8_t *in, size_t in_len,
+                            char *out, size_t out_len)
+{
+    static const char B32_ALPHA[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+
+    if (out_len == 0) return;
+    if (in_len == 0) { out[0] = '\0'; return; }
+
+    size_t out_pos = 0;
+    uint32_t bits  = 0;   /* accumulator */
+    int      n     = 0;   /* bits currently loaded */
+
+    for (size_t i = 0; i < in_len; i++) {
+        bits = (bits << 8) | in[i];
+        n   += 8;
+        while (n >= 5) {
+            n -= 5;
+            if (out_pos < out_len - 1) {
+                out[out_pos++] = B32_ALPHA[(bits >> n) & 0x1F];
+            }
+        }
+    }
+
+    /* Flush any remaining bits (pad with trailing zero-bits, no '=' chars) */
+    if (n > 0 && out_pos < out_len - 1) {
+        out[out_pos++] = B32_ALPHA[(bits << (5 - n)) & 0x1F];
+    }
+
+    out[out_pos] = '\0';
+}
+#endif
 
 /* POST /api/provision — parse, validate, save credentials, trigger reboot */
 static esp_err_t handle_provision(httpd_req_t *req)
@@ -411,45 +504,206 @@ static esp_err_t handle_provision(httpd_req_t *req)
 
 #if CONFIG_OPSEC_HMAC_TOPIC || CONFIG_OPSEC_TOTP
     uint8_t hmac_secret[STORAGE_HMAC_SECRET_LEN];
-    storage_load_or_generate_hmac_secret(hmac_secret);
+    esp_err_t secret_err = storage_load_or_generate_hmac_secret(hmac_secret);
+    if (secret_err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to load HMAC secret: %s", esp_err_to_name(secret_err));
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR,
+                            "Failed to load security credentials");
+        return ESP_FAIL;
+    }
     char hmac_hex[STORAGE_HMAC_SECRET_LEN * 2 + 1];
     for (int i = 0; i < STORAGE_HMAC_SECRET_LEN; i++)
         snprintf(hmac_hex + i * 2, 3, "%02x", hmac_secret[i]);
 #endif
+
 #if CONFIG_OPSEC_TOTP
     uint8_t totp_seed[STORAGE_TOTP_SEED_LEN];
-    storage_load_or_generate_totp_seed(totp_seed);
+    esp_err_t totp_err = storage_load_or_generate_totp_seed(totp_seed);
+    if (totp_err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to load TOTP seed: %s", esp_err_to_name(totp_err));
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR,
+                            "Failed to load security credentials");
+        return ESP_FAIL;
+    }
     char totp_hex[STORAGE_TOTP_SEED_LEN * 2 + 1];
     for (int i = 0; i < STORAGE_TOTP_SEED_LEN; i++)
         snprintf(totp_hex + i * 2, 3, "%02x", totp_seed[i]);
+    /* Base32 for authenticator apps: 20 bytes → 32 chars + null */
+    char totp_b32[33];
+    bytes_to_base32(totp_seed, STORAGE_TOTP_SEED_LEN, totp_b32, sizeof(totp_b32));
+    /* otpauth URI for QR / direct import */
+    char otp_uri[128];
+    snprintf(otp_uri, sizeof(otp_uri),
+             "otpauth://totp/WoL-Relay?secret=%s&issuer=WoL-Relay", totp_b32);
 #endif
 
-    /* Send success response before triggering the reboot */
-    cJSON *ok = cJSON_CreateObject();
-    cJSON_AddStringToObject(ok, "status", "ok");
+    /* ----------------------------------------------------------------
+     * Build the HTML secrets page.
+     * The user MUST click the button to trigger the reboot — we do NOT
+     * call esp_restart() here or set the event bit here.
+     * ---------------------------------------------------------------- */
+    httpd_resp_set_type(req, "text/html");
+
+    /* Page header + warning banner */
+    httpd_resp_send_chunk(req,
+        "<!DOCTYPE html><html><head>"
+        "<meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
+        "<title>WoL Relay — Credentials Saved</title>"
+        "<style>"
+        "body{font-family:sans-serif;background:#0d1117;color:#e6edf3;margin:0;padding:16px;"
+        "opacity:0;animation:fadeIn 0.8s cubic-bezier(0.4,0,0.2,1) forwards}"
+        "@keyframes fadeIn{to{opacity:1}}"
+        "h1{font-size:1.3rem;margin-bottom:4px}"
+        ".warn{background:#5a1e00;border:1px solid #d45000;border-radius:8px;"
+               "padding:14px;margin:16px 0;font-size:.95rem;line-height:1.5}"
+        ".box{background:#161b22;border:1px solid #30363d;border-radius:8px;"
+              "padding:14px;margin:12px 0}"
+        ".label{font-size:.75rem;color:#8b949e;text-transform:uppercase;"
+                "letter-spacing:.08em;margin-bottom:6px}"
+        ".secret{font-family:monospace;font-size:1rem;word-break:break-all;"
+                 "background:#0d1117;padding:10px;border-radius:6px;"
+                 "border:1px solid #30363d;color:#58a6ff}"
+        ".uri{font-size:.8rem;color:#79c0ff;word-break:break-all;margin-top:8px}"
+        ".btn{display:block;width:100%;padding:16px;margin-top:24px;"
+              "background:#238636;border:none;border-radius:8px;"
+              "color:#fff;font-size:1.1rem;cursor:pointer;"
+              "letter-spacing:.03em;font-weight:600}"
+        ".btn:hover{background:#2ea043}"
+        "</style></head><body>"
+        "<h1>&#x2705; Credentials Saved</h1>"
+        "<p style=\"color:#8b949e\">WiFi and MQTT settings have been written to flash.</p>"
+        "<div class=\"warn\">&#x26A0;&#xFE0F; <strong>Save these values now.</strong><br>"
+        "They will not be shown again. If you lose them you will need to "
+        "factory&#x2011;reset the device to generate new ones.</div>",
+        HTTPD_RESP_USE_STRLEN);
 
 #if CONFIG_OPSEC_HMAC_TOPIC || CONFIG_OPSEC_TOTP
-    cJSON_AddStringToObject(ok, "hmac_secret", hmac_hex);
+    /* HMAC secret box */
+    char hmac_chunk[256];
+    snprintf(hmac_chunk, sizeof(hmac_chunk),
+        "<div class=\"box\"><div class=\"label\">HMAC Secret &mdash; paste into your "
+        "trigger script&rsquo;s <code>HMAC_SECRET</code> variable</div>"
+        "<div class=\"secret\">%s</div></div>",
+        hmac_hex);
+    httpd_resp_send_chunk(req, hmac_chunk, HTTPD_RESP_USE_STRLEN);
 #endif
+
 #if CONFIG_OPSEC_TOTP
-    cJSON_AddStringToObject(ok, "totp_seed", totp_hex);
+    /* TOTP seed box */
+    char totp_chunk[512];
+    snprintf(totp_chunk, sizeof(totp_chunk),
+        "<div class=\"box\"><div class=\"label\">TOTP Seed &mdash; import into your "
+        "authenticator app or paste into your trigger script&rsquo;s <code>TOTP_SEED</code> variable</div>"
+        "<div class=\"secret\">%s</div>"
+        "<div class=\"uri\">%s</div></div>",
+        totp_b32, otp_uri);
+    httpd_resp_send_chunk(req, totp_chunk, HTTPD_RESP_USE_STRLEN);
 #endif
 
-    cJSON_AddStringToObject(ok, "message", "Credentials saved. Rebooting...");
-    esp_err_t ret = send_json(req, ok, 200);
-    cJSON_Delete(ok);
+    /* Confirmation button — POSTs to /reboot */
+    httpd_resp_send_chunk(req,
+        "<form method=\"POST\" action=\"/reboot\">"
+        "<button class=\"btn\" type=\"submit\">"
+        "I have saved my credentials &mdash; Start Relay</button>"
+        "</form>"
+        "</body></html>",
+        HTTPD_RESP_USE_STRLEN);
 
-    /* Signal portal_start() to finish and reboot */
-    xEventGroupSetBits(s_portal_events, PORTAL_CRED_SAVED_BIT);
+    /* Terminate chunked transfer */
+    esp_err_t ret = httpd_resp_send_chunk(req, NULL, 0);
     return ret;
 }
 
-/* OS captive-portal detection: redirect everything else to / */
+/* --------------------------------------------------------------------------
+ * GET /provisioned — acknowledgment page shown after secrets are read.
+ * Contains the single "Start Relay" button that POSTs to /reboot.
+ * -------------------------------------------------------------------------- */
+static esp_err_t provisioned_get_handler(httpd_req_t *req)
+{
+    httpd_resp_set_type(req, "text/html");
+    return httpd_resp_sendstr(req,
+        "<!DOCTYPE html><html><head>"
+        "<meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
+        "<title>WoL Relay — Ready</title>"
+        "<style>"
+        "body{font-family:sans-serif;background:#0d1117;color:#e6edf3;"
+              "margin:0;padding:32px 16px;text-align:center}"
+        "h1{font-size:1.4rem}"
+        "p{color:#8b949e;line-height:1.6}"
+        ".btn{display:inline-block;padding:16px 32px;margin-top:24px;"
+              "background:#238636;border:none;border-radius:8px;"
+              "color:#fff;font-size:1.1rem;cursor:pointer;font-weight:600}"
+        ".btn:hover{background:#2ea043}"
+        "</style></head><body>"
+        "<h1>&#x2705; Provisioning Complete</h1>"
+        "<p>Your WiFi, MQTT, and security credentials have been saved to flash.</p>"
+        "<p>Press the button below when you have recorded all secrets from the previous page.</p>"
+        "<form method=\"POST\" action=\"/reboot\">"
+        "<button class=\"btn\" type=\"submit\">"
+        "I have saved my credentials &mdash; Start Relay</button>"
+        "</form>"
+        "</body></html>");
+}
+
+/* --------------------------------------------------------------------------
+ * POST /reboot — explicit user confirmation triggers the actual reboot.
+ * Sets the event bit that unblocks portal_start(), then responds before
+ * the chip resets so the browser gets a final confirmation message.
+ * -------------------------------------------------------------------------- */
+static esp_err_t reboot_post_handler(httpd_req_t *req)
+{
+    httpd_resp_set_type(req, "text/html");
+    httpd_resp_sendstr(req,
+        "<!DOCTYPE html><html><head>"
+        "<meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
+        "<title>WoL Relay — Rebooting</title>"
+        "<style>"
+        "body{font-family:sans-serif;background:#0d1117;color:#e6edf3;"
+              "margin:0;padding:32px 16px;text-align:center}"
+        "h1{font-size:1.4rem}"
+        "p{color:#8b949e}"
+        "</style></head><body>"
+        "<h1>&#x1F680; Relay Starting&hellip;</h1>"
+        "<p>The device is rebooting and will connect to your WiFi network.</p>"
+        "<p>You may close this page.</p>"
+        "</body></html>");
+    /* Signal portal_start() — the event group unblocks and triggers restart */
+    xEventGroupSetBits(s_portal_events, PORTAL_CRED_SAVED_BIT);
+    return ESP_OK;
+}
+
+/* OS captive-portal detection: redirect everything else to the portal root.
+ *
+ * 303 See Other (not 302): ensures POST requests are also redirected to GET.
+ *
+ * Body is required — iOS ignores a body-less redirect when performing
+ * captive portal detection; it expects actual content in the response to
+ * confirm that a portal is present. "Redirect to captive portal" satisfies
+ * this requirement without triggering any additional OS-side logic. */
 static esp_err_t handle_captive_redirect(httpd_req_t *req)
 {
-    httpd_resp_set_status(req, "302 Found");
+    httpd_resp_set_status(req, "303 See Other");
     httpd_resp_set_hdr(req, "Location", "http://" SOFTAP_IP "/");
-    return httpd_resp_send(req, NULL, 0);
+    return httpd_resp_sendstr(req, "Redirect to captive portal");
+}
+
+/* 404 error handler — registered via httpd_register_err_handler().
+ *
+ * Distinct from the wildcard URI catch-all above. The httpd framework
+ * raises a 404 error before URI matching in some edge cases (malformed
+ * request line, method not allowed on an unregistered path, etc.). This
+ * handler catches those and redirects them identically to handle_captive_
+ * redirect, ensuring no request ever returns a bare 404 page.
+ *
+ * iOS requires a non-empty body on a captive portal redirect response;
+ * a bare 303 without body content is silently ignored by the OS. */
+static esp_err_t http_404_error_handler(httpd_req_t *req,
+                                        httpd_err_code_t error)
+{
+    (void)error;
+    httpd_resp_set_status(req, "303 See Other");
+    httpd_resp_set_hdr(req, "Location", "http://" SOFTAP_IP "/");
+    return httpd_resp_sendstr(req, "Redirect to captive portal");
 }
 
 /* --------------------------------------------------------------------------
@@ -481,6 +735,9 @@ static httpd_handle_t start_http_server(void)
         {.uri = "/ncsi.txt", .method = HTTP_GET, .handler = handle_captive_redirect},
         {.uri = "/connecttest.txt", .method = HTTP_GET, .handler = handle_captive_redirect},
         {.uri = "/redirect", .method = HTTP_GET, .handler = handle_captive_redirect},
+        /* Acknowledgment and explicit reboot trigger */
+        {.uri = "/provisioned", .method = HTTP_GET,  .handler = provisioned_get_handler},
+        {.uri = "/reboot",      .method = HTTP_POST, .handler = reboot_post_handler},
         /* Wildcard catch-all — must be last */
         {.uri = "/*", .method = HTTP_ANY, .handler = handle_captive_redirect},
     };
@@ -489,6 +746,12 @@ static httpd_handle_t start_http_server(void)
     {
         httpd_register_uri_handler(server, &uris[i]);
     }
+
+    /* Secondary catch-all: handles 404s raised by the framework before
+     * URI matching (e.g. unrecognized method on unregistered path).
+     * The wildcard URI above handles the common case; this covers the rest. */
+    httpd_register_err_handler(server, HTTPD_404_NOT_FOUND,
+                               http_404_error_handler);
 
     ESP_LOGI(TAG, "HTTP server ready on port %d", CONFIG_PORTAL_HTTP_PORT);
     return server;

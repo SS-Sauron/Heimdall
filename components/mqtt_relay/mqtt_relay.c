@@ -15,12 +15,11 @@
 
 #include <string.h>
 #include <stdio.h>
+#include <inttypes.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include "freertos/event_groups.h"
 #include "esp_log.h"
 #include "esp_err.h"
-#include "esp_wifi.h"
 #include "esp_heap_caps.h"
 #include "mqtt_client.h" /* esp-mqtt native component */
 #include "storage.h"
@@ -39,10 +38,6 @@ static char s_cmd_topic[OPSEC_TOPIC_MAX_LEN];
 static char s_rsp_topic[OPSEC_TOPIC_MAX_LEN];
 static esp_mqtt_client_handle_t s_client = NULL;
 
-/* Event group: set FATAL bit if the client should not be restarted */
-#define RELAY_FATAL_BIT BIT0
-static EventGroupHandle_t s_relay_events = NULL;
-
 /* --------------------------------------------------------------------------
  * Response channel
  *
@@ -55,27 +50,20 @@ static void publish_response(const uint8_t mac[6], esp_err_t wol_result)
     if (s_client == NULL)
         return;
 
-    /* RSSI: read from the current AP record; fall back to 0 on error */
-    int8_t rssi = 0;
-    wifi_ap_record_t ap_info;
-    if (esp_wifi_sta_get_ap_info(&ap_info) == ESP_OK) {
-        rssi = ap_info.rssi;
-    }
-
-    /* Heap and uptime diagnostics */
-    uint32_t heap_free      = esp_get_free_heap_size();
-    int64_t  uptime_s       = esp_timer_get_time() / 1000000LL;
+    /* Relay health diagnostics — RSSI omitted: it reports the ESP32's own
+     * signal strength to its router, which says nothing about whether the
+     * target PC woke up. Free heap and uptime are actionable instead. */
+    uint32_t heap_free = esp_get_free_heap_size();
+    int64_t  uptime_s  = esp_timer_get_time() / 1000000LL;
 
     char payload[160];
     snprintf(payload, sizeof(payload),
              "{\"mac\":\"%02X:%02X:%02X:%02X:%02X:%02X\","
              "\"status\":\"%s\","
-             "\"rssi\":%d,"
              "\"free_heap\":%" PRIu32 ","
              "\"uptime_s\":%" PRId64 "}",
              mac[0], mac[1], mac[2], mac[3], mac[4], mac[5],
              wol_result == ESP_OK ? "sent" : "error",
-             (int)rssi,
              heap_free,
              uptime_s
     );
@@ -179,6 +167,15 @@ static void mqtt_event_handler(void *arg, esp_event_base_t base,
             {
                 ESP_LOGE(TAG, "TLS error: 0x%x",
                          event->error_handle->esp_tls_last_esp_err);
+            }
+
+            if (event->error_handle->error_type == MQTT_ERROR_TYPE_CONNECTION_REFUSED &&
+                (event->error_handle->connect_return_code == MQTT_CONNECTION_REFUSE_NOT_AUTHORIZED ||
+                 event->error_handle->connect_return_code == MQTT_CONNECTION_REFUSE_BAD_USERNAME))
+            {
+                ESP_LOGE(TAG, "Invalid MQTT credentials — wiping device and rebooting to portal");
+                storage_erase_all();
+                esp_restart();
             }
         }
         break;
@@ -296,21 +293,11 @@ void mqtt_relay_start(void)
      * and provides a place to add future health checks (e.g. watchdog
      * kicks, periodic RSSI logging, uptime heartbeat publishing).
      * ------------------------------------------------------------------ */
-    s_relay_events = xEventGroupCreate();
-
     while (true)
     {
         /* Log uptime every 5 minutes at DEBUG level */
         vTaskDelay(pdMS_TO_TICKS(300000));
         ESP_LOGD(TAG, "Relay alive — uptime: %llu s",
                  (unsigned long long)esp_timer_get_time() / 1000000ULL);
-
-        /* Check if a fatal event was signalled by the event handler */
-        EventBits_t bits = xEventGroupGetBits(s_relay_events);
-        if (bits & RELAY_FATAL_BIT)
-        {
-            ESP_LOGE(TAG, "Fatal relay error — rebooting");
-            esp_restart();
-        }
     }
 }

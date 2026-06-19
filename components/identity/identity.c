@@ -173,14 +173,23 @@ apply_mac_spoof:
     {
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
     esp_err_t init_err = esp_wifi_init(&cfg);
-    if (init_err == ESP_ERR_WIFI_INIT_STATE)
-    {
-        ESP_LOGD(TAG, "WiFi already initialised — skipping init in identity");
-    }
-    else
+    /* ESP-IDF v5 returns ESP_ERR_WIFI_INIT_STATE on double-init;
+     * v6 returns the generic ESP_ERR_INVALID_STATE — both are safe to ignore. */
+    if (init_err != ESP_OK &&
+        init_err != ESP_ERR_WIFI_INIT_STATE &&
+        init_err != ESP_ERR_INVALID_STATE)
     {
         ESP_ERROR_CHECK(init_err);
     }
+
+    /* Espressif requirement: esp_wifi_set_mode() MUST be called before
+     * esp_wifi_set_mac() so the driver knows which interface owns the MAC.
+     * Without this, esp_wifi_set_mac(WIFI_IF_STA, ...) returns
+     * ESP_ERR_WIFI_MODE and the spoof silently fails.
+     *
+     * We set STA here; downstream callers (portal → APSTA, wifi_sta → STA)
+     * will set the final mode before esp_wifi_start(), so this is safe. */
+    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
 
     apply_mac_spoof(base_mac);
     }
@@ -210,3 +219,31 @@ void identity_get_hostname(char *buf, size_t len)
     strncpy(buf, s_effective_hostname, len - 1);
     buf[len - 1] = '\0';
 }
+
+/* --------------------------------------------------------------------------
+ * AP MAC spoofing — call AFTER esp_wifi_set_mode(APSTA) and BEFORE start()
+ * -------------------------------------------------------------------------- */
+#if CONFIG_OPSEC_IDENTITY_SPOOF_MAC
+esp_err_t identity_spoof_ap_mac(void)
+{
+    /* Derive AP MAC from the already-spoofed STA MAC.
+     * Increment the last byte by 1 — the same natural STA→AP offset the
+     * hardware uses — so the pair looks coherent on the network without
+     * revealing the Espressif OUI (78:1C:3C…) in beacon frames. */
+    uint8_t ap_mac[6];
+    memcpy(ap_mac, s_effective_mac, 6);
+    ap_mac[5] += 1;
+
+    esp_err_t err = esp_wifi_set_mac(WIFI_IF_AP, ap_mac);
+    if (err != ESP_OK)
+    {
+        ESP_LOGE(TAG, "AP MAC spoof failed: %s", esp_err_to_name(err));
+        return err;
+    }
+
+    ESP_LOGI(TAG, "AP  MAC spoofed → %02X:%02X:%02X:%02X:%02X:%02X",
+             ap_mac[0], ap_mac[1], ap_mac[2],
+             ap_mac[3], ap_mac[4], ap_mac[5]);
+    return ESP_OK;
+}
+#endif

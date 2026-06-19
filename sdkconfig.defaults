@@ -44,6 +44,10 @@ CONFIG_ESP_WIFI_DYNAMIC_RX_BUFFER_NUM=16
 # Disable WiFi NVS storage — we manage credentials ourselves in the
 # storage component so we control the NVS namespace and key names.
 CONFIG_ESP_WIFI_NVS_ENABLED=n
+# Slow-path absolute timeout: 30 minutes per boot session, up to 7 consecutive
+# reboot cycles (≈ 3.5 hours total) before credentials are erased.
+CONFIG_WIFI_STA_ABSOLUTE_TIMEOUT_MINUTES=30
+CONFIG_WIFI_STA_ABSOLUTE_TIMEOUT_MAX_REBOOTS=7
 
 # -----------------------------------------------------------------------------
 # MQTT (esp-mqtt native component)
@@ -51,9 +55,7 @@ CONFIG_ESP_WIFI_NVS_ENABLED=n
 CONFIG_MQTT_PROTOCOL_311=y
 CONFIG_MQTT_TRANSPORT_SSL=y
 CONFIG_MQTT_TRANSPORT_WEBSOCKET=n
-CONFIG_MQTT_TRANSPORT_WEBSOCKET_SECURE=n
-CONFIG_MQTT_SKIP_PUBLISH_IF_DISCONNECTED=n
-CONFIG_MQTT_OUTBOX_EXPIRED_TIMEOUT_MS=30000
+CONFIG_MQTT_RELAY_TASK_STACK_KB=8
 
 # -----------------------------------------------------------------------------
 # Bootloader

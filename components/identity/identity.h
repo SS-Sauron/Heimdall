@@ -15,6 +15,7 @@
 #pragma once
 
 #include "esp_err.h"
+#include "sdkconfig.h"
 #include <stdint.h>
 
 #ifdef __cplusplus
@@ -55,6 +56,25 @@ esp_err_t identity_get_mac(uint8_t mac[6]);
  * @param[in]  len   Size of buf in bytes (32 bytes is sufficient).
  */
 void identity_get_hostname(char *buf, size_t len);
+
+/**
+ * @brief Spoof the softAP MAC address to hide the Espressif OUI.
+ *
+ * Must be called AFTER esp_wifi_set_mode() includes WIFI_MODE_AP (or
+ * WIFI_MODE_APSTA) and BEFORE esp_wifi_start(). The AP MAC is derived
+ * from the already-spoofed STA MAC by incrementing the last byte by 1,
+ * mirroring the natural STA→AP offset the hardware uses by default.
+ *
+ * This is a no-op when CONFIG_OPSEC_IDENTITY_SPOOF_MAC is disabled
+ * (STANDARD build).
+ *
+ * @return ESP_OK on success, or an esp_err_t on failure.
+ */
+#if CONFIG_OPSEC_IDENTITY_SPOOF_MAC
+esp_err_t identity_spoof_ap_mac(void);
+#else
+static inline esp_err_t identity_spoof_ap_mac(void) { return ESP_OK; }
+#endif
 
 #ifdef __cplusplus
 }

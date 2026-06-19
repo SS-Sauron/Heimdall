@@ -5,5 +5,4 @@ idf_component_register(
         "."
     REQUIRES
         nvs_flash
-        espressif__button
 )

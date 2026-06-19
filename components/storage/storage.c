@@ -17,8 +17,6 @@
 #include "nvs_flash.h"
 #include "storage.h"
 #include "sdkconfig.h"
-#include "iot_button.h"
-#include "button_gpio.h"
 #include "esp_system.h"
 
 static const char *TAG   = "storage";
@@ -35,6 +33,7 @@ static const char *NS    = CONFIG_STORAGE_NVS_NAMESPACE;   /* e.g. "wol" */
 #define KEY_HMAC_SECRET   "hs"
 #define KEY_TOTP_SEED     "ts"
 #define KEY_HOSTNAME      "hn"
+#define KEY_REBOOT_COUNT  "rc"  /* WiFi slow-path reboot-strike counter (u8) */
 
 /* --------------------------------------------------------------------------
  * Internal helper — open the NVS namespace
@@ -222,6 +221,43 @@ esp_err_t storage_erase_all(void)
 }
 
 /* --------------------------------------------------------------------------
+ * WiFi slow-path reboot-strike counter
+ * -------------------------------------------------------------------------- */
+esp_err_t storage_get_reboot_count(uint8_t *count)
+{
+    if (count == NULL) return ESP_ERR_INVALID_ARG;
+
+    nvs_handle_t h;
+    esp_err_t err = open_nvs(NVS_READONLY, &h);
+    if (err != ESP_OK) {
+        /* namespace doesn't exist yet on a brand-new device — treat as 0 */
+        *count = 0;
+        return ESP_OK;
+    }
+
+    err = nvs_get_u8(h, KEY_REBOOT_COUNT, count);
+    nvs_close(h);
+
+    if (err == ESP_ERR_NVS_NOT_FOUND) {
+        /* Key was never written — counter starts at 0, not an error */
+        *count = 0;
+        return ESP_OK;
+    }
+    return err;
+}
+
+esp_err_t storage_set_reboot_count(uint8_t count)
+{
+    nvs_handle_t h;
+    esp_err_t err = open_nvs(NVS_READWRITE, &h);
+    if (err != ESP_OK) return err;
+    err = nvs_set_u8(h, KEY_REBOOT_COUNT, count);
+    if (err == ESP_OK) err = nvs_commit(h);
+    nvs_close(h);
+    return err;
+}
+
+/* --------------------------------------------------------------------------
  * Hostname
  * -------------------------------------------------------------------------- */
 esp_err_t storage_save_hostname(const char *hostname)
@@ -258,44 +294,3 @@ esp_err_t storage_load_hostname(char *out, size_t out_len)
     return err;
 }
 
-/* --------------------------------------------------------------------------
- * Factory Reset Button
- * -------------------------------------------------------------------------- */
-
-static void factory_reset_cb(void *button_handle, void *usr_data)
-{
-    ESP_LOGW(TAG, "Factory reset via BOOT button long-press — wiping credentials");
-    storage_erase_all();
-    ESP_LOGW(TAG, "Rebooting into portal mode");
-    esp_restart();
-    /* never returns */
-}
-
-void storage_button_init(void)
-{
-    button_config_t btn_cfg = {
-        .long_press_time  = 0,    // 0 = use global Kconfig default
-        .short_press_time = 200,  // minimum press duration to register a short click (ms)
-    };
-    button_gpio_config_t gpio_cfg = {
-        .gpio_num = 0,            // BOOT button
-        .active_level = 0,        // active low
-        .enable_power_save = false,
-    };
-    button_handle_t btn_handle = NULL;
-    esp_err_t err = iot_button_new_gpio_device(&btn_cfg, &gpio_cfg, &btn_handle);
-    if (err != ESP_OK || btn_handle == NULL) {
-        ESP_LOGE(TAG, "Failed to initialize BOOT button");
-        return;
-    }
-
-    button_event_args_t long_press_args = {
-        .long_press.press_time = CONFIG_WOL_FACTORY_RESET_HOLD_MS,
-    };
-    esp_err_t cb_err = iot_button_register_cb(btn_handle, BUTTON_LONG_PRESS_START,
-                                           &long_press_args, factory_reset_cb, NULL);
-    if (cb_err != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to register factory reset callback: %s",
-                 esp_err_to_name(cb_err));
-    }
-}

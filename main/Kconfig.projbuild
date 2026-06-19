@@ -56,7 +56,7 @@ menu "WoL Relay"
     config WOL_FACTORY_RESET_HOLD_MS
         int "Factory reset hold duration (ms)"
         default 5000
-        range 2000 15000
+        range 3000 15000
         help
             How long (in milliseconds) the BOOT button must be held to
             trigger a factory reset. 5000 ms = 5 seconds.

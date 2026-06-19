@@ -23,8 +23,9 @@
 
 static const char *TAG = "wifi_sta";
 
-#define STA_CONNECTED_BIT BIT0
-#define STA_FAIL_BIT BIT1
+#define STA_CONNECTED_BIT           BIT0
+#define STA_FAIL_BIT                BIT1
+#define STA_ABSOLUTE_TIMEOUT_BIT    BIT2  /* slow-path: 30-min ceiling elapsed */
 
 static EventGroupHandle_t s_wifi_events = NULL;
 static int s_retry_count = 0;
@@ -46,27 +47,26 @@ static void on_wifi_disconnect(void *arg, esp_event_base_t base,
 {
     s_connected = false;
 
-    /* Start the absolute-timeout clock on the first disconnect */
+    /* Start the absolute-timeout clock on the first disconnect this boot */
     if (!s_is_tracking_disconnect) {
         s_disconnect_start_time = esp_timer_get_time();
         s_is_tracking_disconnect = true;
-        ESP_LOGW(TAG, "Absolute timeout clock started");
+        ESP_LOGW(TAG, "Absolute timeout clock started (ceiling: %d min)",
+                 CONFIG_WIFI_STA_ABSOLUTE_TIMEOUT_MINUTES);
     }
 
-    /* Slow path: if we have been continuously disconnected for longer than
-     * CONFIG_WIFI_STA_ABSOLUTE_TIMEOUT_MINUTES, the SSID is probably wrong.
-     * Erase credentials and reboot into the provisioning portal. */
+    /* Slow path: if the device has been continuously disconnected for the
+     * entire per-boot ceiling AND has never obtained an IP this boot,
+     * signal the main task to apply the reboot-strike logic. */
     if (!s_has_connected_once) {
-        const uint64_t ceiling_us = (uint64_t)CONFIG_WIFI_STA_ABSOLUTE_TIMEOUT_MINUTES * 60ULL * 1000000ULL;
+        const uint64_t ceiling_us =
+            (uint64_t)CONFIG_WIFI_STA_ABSOLUTE_TIMEOUT_MINUTES * 60ULL * 1000000ULL;
         if ((uint64_t)(esp_timer_get_time() - s_disconnect_start_time) >= ceiling_us) {
             ESP_LOGE(TAG,
-                     "Absolute timeout (%d min) exceeded — erasing credentials "
-                     "and rebooting into portal",
+                     "Absolute timeout (%d min) exceeded — signalling slow-path reboot",
                      CONFIG_WIFI_STA_ABSOLUTE_TIMEOUT_MINUTES);
-            xEventGroupSetBits(s_wifi_events, STA_FAIL_BIT);
-            storage_erase_all();
-            esp_restart();
-            /* unreachable */
+            xEventGroupSetBits(s_wifi_events, STA_ABSOLUTE_TIMEOUT_BIT);
+            return; /* do NOT retry — let wifi_sta_connect() handle the restart */
         }
     }
 
@@ -113,10 +113,22 @@ static void on_got_ip(void *arg, esp_event_base_t base,
 {
     ip_event_got_ip_t *event = (ip_event_got_ip_t *)data;
     ESP_LOGI(TAG, "Got IP: " IPSTR, IP2STR(&event->ip_info.ip));
+
+    /* Reset fast-path counter */
     s_retry_count = 0;
     s_connected = true;
-    s_has_connected_once = true; // Permanently disable the absolute timeout for this boot session
-    s_is_tracking_disconnect = false; // Reset the disconnect tracker
+
+    /* Permanently disable the absolute timeout for this boot session */
+    s_has_connected_once = true;
+    s_is_tracking_disconnect = false;
+    s_disconnect_start_time = 0;
+
+    /* Reset the persistent reboot-strike counter — any successful connection
+     * proves the network is reachable, so consecutive-failure counting resets.
+     * Ignore errors: if NVS is temporarily unavailable we simply don't clear
+     * the counter this cycle; it will be cleared on the next successful boot. */
+    storage_set_reboot_count(0);
+
     xEventGroupSetBits(s_wifi_events, STA_CONNECTED_BIT);
 }
 
@@ -184,13 +196,18 @@ esp_err_t wifi_sta_connect(void)
     ESP_LOGI(TAG, "Connecting to SSID: %s", creds.wifi_ssid);
     esp_wifi_connect();
 
-    /* Block indefinitely — the slow-path absolute timeout in
-     * on_wifi_disconnect() guarantees we never hang here forever.
-     * The only exit is STA_CONNECTED_BIT (returns ESP_OK) or
-     * STA_FAIL_BIT (fast-path erase+restart, never returns). */
+    /* Block indefinitely — two internal escape hatches prevent a permanent hang:
+     *   STA_CONNECTED_BIT        → success, return ESP_OK.
+     *   STA_FAIL_BIT             → fast path: wrong credentials confirmed after
+     *                              CONFIG_WIFI_STA_MAX_RETRY attempts; erase+restart.
+     *   STA_ABSOLUTE_TIMEOUT_BIT → slow path: per-boot 30-min ceiling elapsed
+     *                              without ever getting an IP; increment reboot-
+     *                              strike counter and restart (erase only after
+     *                              CONFIG_WIFI_STA_ABSOLUTE_TIMEOUT_MAX_REBOOTS
+     *                              consecutive cycles). */
     EventBits_t bits = xEventGroupWaitBits(
         s_wifi_events,
-        STA_CONNECTED_BIT | STA_FAIL_BIT,
+        STA_CONNECTED_BIT | STA_FAIL_BIT | STA_ABSOLUTE_TIMEOUT_BIT,
         pdFALSE, pdFALSE,
         portMAX_DELAY);
 
@@ -199,9 +216,35 @@ esp_err_t wifi_sta_connect(void)
         return ESP_OK;
     }
 
+    if (bits & STA_ABSOLUTE_TIMEOUT_BIT)
+    {
+        /* Slow path: read, increment, and persist the reboot-strike counter */
+        uint8_t strikes = 0;
+        storage_get_reboot_count(&strikes);
+        strikes++;
+        storage_set_reboot_count(strikes);
+
+        if (strikes >= CONFIG_WIFI_STA_ABSOLUTE_TIMEOUT_MAX_REBOOTS)
+        {
+            ESP_LOGE(TAG,
+                     "Reboot-strike threshold reached (%d/%d) — "
+                     "erasing credentials and rebooting into portal",
+                     strikes, CONFIG_WIFI_STA_ABSOLUTE_TIMEOUT_MAX_REBOOTS);
+            storage_erase_all();
+        }
+        else
+        {
+            ESP_LOGW(TAG,
+                     "Slow-path reboot strike %d/%d — retrying after restart",
+                     strikes, CONFIG_WIFI_STA_ABSOLUTE_TIMEOUT_MAX_REBOOTS);
+        }
+        esp_restart();
+        /* unreachable */
+    }
+
     /* STA_FAIL_BIT: wrong credentials confirmed — erase and reboot.
-     * (The slow-path erases+restarts directly from the event handler;
-     * this branch handles the fast-path MAX_RETRY case.) */
+     * (on_wifi_disconnect() sets this bit after MAX_RETRY wrong-cred events;
+     * it never touches the reboot-strike counter.) */
     ESP_LOGE(TAG, "Wrong credentials confirmed — clearing NVS and rebooting");
     storage_erase_all();
     esp_restart();

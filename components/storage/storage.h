@@ -18,6 +18,7 @@
  *   "hs"  →  HMAC secret      (blob, 32 bytes)
  *   "ts"  →  TOTP seed        (blob, 20 bytes, HMAC-SHA1 for RFC 6238)
  *   "hn"  →  custom hostname  (str, max 32 chars, RFC 1123 label)
+ *   "rc"  →  WiFi reboot-strike counter (u8, slow-path absolute-timeout)
  */
 
 #pragma once
@@ -120,6 +121,40 @@ esp_err_t storage_save_totp_seed(const uint8_t seed[STORAGE_TOTP_SEED_LEN]);
 esp_err_t storage_load_or_generate_totp_seed(uint8_t seed[STORAGE_TOTP_SEED_LEN]);
 
 /* -------------------------------------------------------------------------
+ * WiFi slow-path reboot-strike counter
+ *
+ * Counts consecutive boot cycles in which wifi_sta_connect() hit the
+ * absolute-timeout ceiling (CONFIG_WIFI_STA_ABSOLUTE_TIMEOUT_MINUTES) without
+ * ever obtaining an IP. When the count reaches
+ * CONFIG_WIFI_STA_ABSOLUTE_TIMEOUT_MAX_REBOOTS the device erases all
+ * credentials and re-enters the provisioning portal.
+ *
+ * The counter is reset to zero by on_got_ip() on any successful connection,
+ * so only truly consecutive failure cycles accumulate toward the threshold.
+ * storage_erase_all() also removes the key, so a factory reset always
+ * starts fresh.
+ * ------------------------------------------------------------------------- */
+
+/**
+ * @brief Read the current reboot-strike count from NVS.
+ *
+ * Returns 0 (not an error) if the key has never been written (first boot,
+ * or after storage_erase_all()).
+ *
+ * @param[out] count  Receives the current strike count.
+ * @return ESP_OK on success.
+ */
+esp_err_t storage_get_reboot_count(uint8_t *count);
+
+/**
+ * @brief Write the reboot-strike count to NVS.
+ *
+ * @param count  New value to persist.
+ * @return ESP_OK on success.
+ */
+esp_err_t storage_set_reboot_count(uint8_t count);
+
+/* -------------------------------------------------------------------------
  * Erase
  * ------------------------------------------------------------------------- */
 
@@ -157,13 +192,6 @@ esp_err_t storage_save_hostname(const char *hostname);
  */
 esp_err_t storage_load_hostname(char *out, size_t out_len);
 
-/**
- * @brief Initialize the factory reset button.
- *
- * Configures GPIO0 with the espressif/button component.
- * A long press (configured via Kconfig) will trigger an NVS erase and reboot.
- */
-void storage_button_init(void);
 
 #ifdef __cplusplus
 }

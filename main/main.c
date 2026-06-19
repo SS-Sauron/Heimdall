@@ -7,8 +7,8 @@
  * Boot sequence:
  *   1. NVS flash init
  *   2. Core networking primitives (netif + event loop)
- *   3. Identity obfuscation (MAC spoof, hostname) — before WiFi starts
- *   4. Factory-reset button check
+ *   3. Factory-reset button check (blocking — GPIO 0, active-low)
+ *   4. Identity obfuscation (MAC spoof, hostname) — before WiFi starts
  *   5. Provisioning check → portal (first boot) or station (normal boot)
  *   6. WiFi station connect
  *   7. MQTT relay start (runs indefinitely)
@@ -41,6 +41,56 @@ RTC_NOINIT_ATTR volatile uint32_t boot_crash_counter;
 /* --------------------------------------------------------------------------
  * app_main — entry point called by ESP-IDF after system init
  * -------------------------------------------------------------------------- */
+
+/* ------------------------------------------------------------------
+ * Background Task: Factory Reset Monitor
+ * Watches GPIO 0 (BOOT button) continuously.
+ * ------------------------------------------------------------------ */
+static void factory_reset_task(void *pvParameters) {
+    gpio_config_t io_conf = {
+        .pin_bit_mask = (1ULL << 0),
+        .mode         = GPIO_MODE_INPUT,
+        .pull_up_en   = GPIO_PULLUP_ENABLE,
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,
+        .intr_type    = GPIO_INTR_DISABLE,
+    };
+    gpio_config(&io_conf);
+
+    while (1) {
+        if (gpio_get_level(0) == 0) {
+            vTaskDelay(pdMS_TO_TICKS(20)); /* debounce */
+            if (gpio_get_level(0) == 0) {
+                ESP_LOGW(TAG, "BOOT button held — factory reset armed. Hold for %d ms to confirm.", CONFIG_WOL_FACTORY_RESET_HOLD_MS);
+                int elapsed_ms = 20;
+                bool confirmed = false;
+                while (elapsed_ms < CONFIG_WOL_FACTORY_RESET_HOLD_MS) {
+                    vTaskDelay(pdMS_TO_TICKS(50));
+                    elapsed_ms += 50;
+                    if (gpio_get_level(0) != 0) {
+                        ESP_LOGI(TAG, "BOOT button released — factory reset cancelled");
+                        break;
+                    }
+                    if (elapsed_ms >= CONFIG_WOL_FACTORY_RESET_HOLD_MS) {
+                        confirmed = true;
+                        break;
+                    }
+                }
+                
+                if (confirmed) {
+                    ESP_LOGW(TAG, "Factory reset confirmed — wiping all NVS credentials");
+                    vTaskDelay(pdMS_TO_TICKS(200));
+                    storage_erase_all();
+                    ESP_LOGI(TAG, "NVS erased — rebooting into captive portal");
+                    vTaskDelay(pdMS_TO_TICKS(200));
+                    esp_log_level_set("*", ESP_LOG_NONE); /* Suppress ugly disconnect errors during reboot */
+                    esp_restart();
+                }
+            }
+        }
+        vTaskDelay(pdMS_TO_TICKS(100)); /* Polling interval */
+    }
+}
+
 void app_main(void)
 {
     esp_reset_reason_t reason = esp_reset_reason();
@@ -101,17 +151,19 @@ void app_main(void)
     ESP_LOGI(TAG, "netif + event loop ready");
 
     /* ------------------------------------------------------------------
-     * Step 3: Identity obfuscation
+     * Step 3: Factory-reset button monitor
+     * Spawns a background task to constantly monitor the BOOT button.
+     * ------------------------------------------------------------------ */
+    xTaskCreate(factory_reset_task, "reset_task", 2048, NULL, 1, NULL);
+
+
+    /* ------------------------------------------------------------------
+     * Step 4: Identity obfuscation
      * Applies MAC spoof and DHCP hostname BEFORE WiFi driver starts,
      * so the spoofed values are the ones the driver registers with the
      * network stack. No-op in STANDARD build (CONFIG_OPSEC_IDENTITY off).
      * ------------------------------------------------------------------ */
     identity_apply();
-
-    /* Step 4: Factory reset button initialization
-     * Setup the BOOT button to trigger a factory reset on long-press.
-     * ------------------------------------------------------------------ */
-    storage_button_init();
 
     /* ------------------------------------------------------------------
      * Step 5: Provisioning branch

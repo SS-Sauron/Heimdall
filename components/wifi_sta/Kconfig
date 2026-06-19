@@ -31,14 +31,30 @@ menu "WiFi Station"
 
     config WIFI_STA_ABSOLUTE_TIMEOUT_MINUTES
         int "Absolute disconnection ceiling before portal fallback (minutes)"
-        default 20
-        range 1 120
+        default 30
+        range 5 480
         help
-            Absolute time ceiling in minutes before a continuously
-            disconnected device erases credentials and restarts into
-            the provisioning portal. This guards against permanent
-            NO_AP_FOUND loops caused by an SSID typo during provisioning.
-            The timer starts on the first disconnect after boot and resets
-            to zero each time a valid IP address is obtained.
+            Maximum time (in minutes) the device will stay in a disconnected
+            state within a single boot session before treating the situation
+            as unresolvable. When this ceiling is hit the device increments
+            a persistent reboot-strike counter in NVS and restarts. If the
+            strike counter reaches WIFI_STA_ABSOLUTE_TIMEOUT_MAX_REBOOTS the
+            device erases credentials and reboots into the provisioning portal.
+            The timer restarts fresh on each boot; it does NOT accumulate
+            across reboots.
+
+    config WIFI_STA_ABSOLUTE_TIMEOUT_MAX_REBOOTS
+        int "Maximum reboot cycles before erasing credentials (reboot-strike threshold)"
+        default 7
+        range 1 20
+        help
+            Number of consecutive 30-minute (WIFI_STA_ABSOLUTE_TIMEOUT_MINUTES)
+            reboot cycles that must elapse before the device concludes the
+            network configuration is permanently broken and erases credentials
+            to force re-provisioning. At the default values (30 min × 7 = 210
+            min ≈ 3.5 hours) the device gives genuine outages plenty of time to
+            resolve on their own. The counter resets to zero the moment a
+            successful IP address is obtained. Analogous to WIFI_STA_MAX_RETRY
+            for the slow path.
 
 endmenu

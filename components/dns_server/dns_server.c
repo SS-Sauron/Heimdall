@@ -24,6 +24,23 @@
  *   - AAAA and other non-A queries receive a header-only response
  *     with an_count = 0 (NOERROR, no answers) — sufficient for
  *     captive portal detection to succeed on all tested OS versions.
+ *
+ * HTTPS interception limitation
+ * ─────────────────────────────
+ * This DNS server CANNOT intercept HTTPS requests. When a user types a
+ * URL that the browser already knows uses HTTPS (e.g. "www.google.com",
+ * any domain on the HSTS preload list, or any URL typed with "https://")
+ * the browser connects directly to port 443. The ESP32 HTTP server on
+ * port 80 never sees the request and DNS redirection has no effect because
+ * the TLS certificate check fails before any HTTP exchange occurs.
+ *
+ * DHCP Option 114 (RFC 8910) is the correct primary solution: it sends
+ * the captive portal URL to the connecting device during IP address
+ * assignment, before the user opens any browser. The OS then performs
+ * a controlled HTTP check to a known non-HTTPS URL and automatically
+ * shows the portal notification pop-up. DNS redirection (this file)
+ * and DHCP Option 114 (portal.c:start_softap) are complementary —
+ * both should be active for maximum OS compatibility.
  */
 
 #include <string.h>

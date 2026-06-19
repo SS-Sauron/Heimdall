@@ -18,6 +18,7 @@
 #include "esp_log.h"
 #include "esp_mac.h"
 #include "esp_sntp.h"
+#define MBEDTLS_DECLARE_PRIVATE_IDENTIFIERS
 #include "mbedtls/md.h"
 #include "storage.h"
 #include "opsec.h"

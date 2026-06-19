@@ -77,8 +77,7 @@ esp_err_t wol_send_raw(const uint8_t mac[6])
     uint8_t pkt[MAGIC_PACKET_LEN];
     build_magic_packet(pkt, mac);
 
-    /* Resolve broadcast address */
-    // REPLACE WITH:
+    /* Resolve broadcast address from STA netif IP and netmask */
     esp_netif_t *sta_netif = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
     if (sta_netif == NULL)
     {
@@ -140,9 +139,9 @@ esp_err_t wol_send_raw(const uint8_t mac[6])
 
     if (ret == ESP_OK)
     {
-        ESP_LOGI(TAG, "Magic Packet sent → %02X:%02X:%02X:%02X:%02X:%02X  via %s:%d (%dx)",
+        ESP_LOGI(TAG, "Magic Packet sent → %02X:%02X:%02X:%02X:%02X:%02X  bcast=" IPSTR " port=%d (%dx)",
                  mac[0], mac[1], mac[2], mac[3], mac[4], mac[5],
-                 CONFIG_WOL_BROADCAST_ADDR, CONFIG_WOL_BROADCAST_PORT,
+                 IP2STR((esp_ip4_addr_t *)&bcast), CONFIG_WOL_BROADCAST_PORT,
                  SEND_REPETITIONS);
     }
     return ret;

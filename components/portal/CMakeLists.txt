@@ -14,6 +14,7 @@ idf_component_register(
         storage
         identity
         espressif__cjson
+        opsec
     PRIV_REQUIRES
         esp_timer
     EMBED_FILES
