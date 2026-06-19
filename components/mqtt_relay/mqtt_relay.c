@@ -243,6 +243,9 @@ void mqtt_relay_start(void)
             },
             .verification = {
                 .crt_bundle_attach = esp_crt_bundle_attach,
+#if CONFIG_MQTT_RELAY_SKIP_CERT_CN_CHECK
+                .skip_cert_common_name_check = true,
+#endif
             },
         },
         .credentials = {

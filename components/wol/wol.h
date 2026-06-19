@@ -23,7 +23,7 @@ extern "C" {
  *
  * Parses @p mac_str (format "AA:BB:CC:DD:EE:FF"), constructs the 102-byte
  * Magic Packet, and sends it as a UDP broadcast to
- * CONFIG_WOL_BROADCAST_ADDR : CONFIG_WOL_BROADCAST_PORT.
+ * the dynamically derived LAN broadcast address on CONFIG_WOL_BROADCAST_PORT.
  *
  * The broadcast is sent three times with a 10 ms gap to improve
  * delivery reliability on lossy local networks.

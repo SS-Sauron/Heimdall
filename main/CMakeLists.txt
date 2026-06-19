@@ -8,7 +8,7 @@ idf_component_register(
         esp_event
         esp_netif
         esp_wifi
-        driver
+
         identity
         storage
         portal

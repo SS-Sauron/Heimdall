@@ -10,24 +10,6 @@ menu "WiFi Station"
             and rebooting. Each retry waits WIFI_STA_RETRY_DELAY_MS
             milliseconds before the next attempt.
 
-    config WIFI_STA_RETRY_DELAY_MS
-        int "Delay between retry attempts (ms)"
-        default 3000
-        range 500 30000
-        help
-            Milliseconds to wait between consecutive reconnect attempts.
-            3000 ms (3 seconds) is a reasonable default. Increase this
-            on congested networks where rapid retries worsen the problem.
-
-    config WIFI_STA_CONNECT_TIMEOUT_MS
-        int "Initial connection timeout (ms) [OBSOLETE — not used]"
-        default 15000
-        range 5000 60000
-        help
-            Formerly the maximum time to wait for the first connection.
-            No longer consulted: wifi_sta_connect() now blocks indefinitely
-            (portMAX_DELAY) and relies on the absolute timeout below to
-            force a portal fallback on permanent failures.
 
     config WIFI_STA_ABSOLUTE_TIMEOUT_MINUTES
         int "Absolute disconnection ceiling before portal fallback (minutes)"
