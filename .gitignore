@@ -6,3 +6,5 @@ managed_components/
 __pycache__/
 node_modules/
 sdkconfig.old
+node_modules/
+sdkconfig.old
