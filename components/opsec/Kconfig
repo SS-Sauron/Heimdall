@@ -81,4 +81,11 @@ menu "OPSEC Features"
             trusted public one (e.g. "time.cloudflare.com") if
             preferred.
 
+    config OPSEC_TEST
+        bool "Expose internal functions for unit testing"
+        default n
+        help
+            Exposes totp_at_counter_for_test() in opsec.h.
+            Never enable in production builds.
+
 endmenu

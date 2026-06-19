@@ -119,6 +119,28 @@ esp_err_t opsec_sync_clock(uint32_t timeout_ms);
  */
 bool opsec_clock_is_synced(void);
 
+#if CONFIG_OPSEC_TEST
+/* -------------------------------------------------------------------------
+ * Test-only exports (CONFIG_OPSEC_TEST=y)
+ * Never enable in production builds.
+ * ------------------------------------------------------------------------- */
+
+/**
+ * @brief Run the TOTP algorithm with explicit parameters (test use only).
+ *
+ * Identical to the internal totp_at_counter() algorithm but accepts
+ * an arbitrary seed and digit count instead of using the NVS globals.
+ *
+ * @param seed      TOTP seed bytes.
+ * @param seed_len  Length of seed in bytes.
+ * @param counter   TOTP counter value T (Unix time / step).
+ * @param digits    Number of output digits (e.g. 6).
+ * @return          TOTP code as an unsigned integer.
+ */
+uint32_t totp_at_counter_for_test(const uint8_t *seed, size_t seed_len,
+                                   uint64_t counter, uint8_t digits);
+#endif /* CONFIG_OPSEC_TEST */
+
 #ifdef __cplusplus
 }
 #endif

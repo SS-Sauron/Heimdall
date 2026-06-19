@@ -47,28 +47,29 @@ jobs:
 
   # ── Job 2: Unit tests (linux host target) ───────────────────────────────────
   # Uncomment this job once test apps are created under tests/
-  #
-  # unit-tests:
-  #   name: Unit Tests (host)
-  #   runs-on: ubuntu-latest
-  #   needs: build
-  #
-  #   steps:
-  #     - name: Checkout repository
-  #       uses: actions/checkout@v4
-  #       with:
-  #         fetch-depth: 0
-  #
-  #     - name: Build and run TOTP tests
-  #       uses: espressif/esp-idf-ci-action@v1
-  #       with:
-  #         esp_idf_version: v6.0.1
-  #         target: linux
-  #         command: |
-  #           cd tests/opsec_test
-  #           idf.py build
-  #           ./build/opsec_test.elf
-  #
+  
+  unit-tests:
+    name: Unit Tests (host)
+    runs-on: ubuntu-latest
+    needs: build
+  
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+  
+      - name: Build and run TOTP tests
+        uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: v6.0.1
+          target: linux
+          command: |
+            cd tests/opsec_test
+            idf.py --preview set-target linux
+            idf.py build
+            ./build/opsec_test.elf
+  
   #     - name: Build and run storage tests
   #       uses: espressif/esp-idf-ci-action@v1
   #       with:

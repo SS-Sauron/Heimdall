@@ -118,6 +118,41 @@ static bool totp_validate(uint32_t submitted_code)
     return false;
 }
 #endif
+#if CONFIG_OPSEC_TEST
+uint32_t totp_at_counter_for_test(const uint8_t *seed, size_t seed_len,
+                                   uint64_t counter, uint8_t digits)
+{
+    /* Encode counter as 8-byte big-endian */
+    uint8_t msg[8];
+    uint64_t T = counter;
+    for (int i = 7; i >= 0; i--)
+    {
+        msg[i] = (uint8_t)(T & 0xFF);
+        T >>= 8;
+    }
+
+    /* HMAC-SHA1 */
+    uint8_t digest[20];
+    mbedtls_md_hmac(mbedtls_md_info_from_type(MBEDTLS_MD_SHA1),
+                    seed, seed_len,
+                    msg, sizeof(msg), digest);
+
+    /* Dynamic truncation */
+    int offset = digest[19] & 0x0F;
+    uint32_t code = ((uint32_t)(digest[offset]     & 0x7F) << 24)
+                  | ((uint32_t)(digest[offset + 1] & 0xFF) << 16)
+                  | ((uint32_t)(digest[offset + 2] & 0xFF) <<  8)
+                  | ((uint32_t)(digest[offset + 3] & 0xFF));
+
+    /* Compute 10^digits */
+    uint32_t modulus = 1;
+    for (uint8_t i = 0; i < digits; i++)
+        modulus *= 10;
+
+    return code % modulus;
+}
+#endif /* CONFIG_OPSEC_TEST */
+
 /* --------------------------------------------------------------------------
  * Public API
  * -------------------------------------------------------------------------- */

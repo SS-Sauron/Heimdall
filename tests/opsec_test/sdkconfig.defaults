@@ -1,0 +1,7 @@
+# linux target — native host executable for unit testing
+# CONFIG_IDF_TARGET is set by `idf.py set-target linux`; listed here for clarity.
+CONFIG_OPSEC_TEST=y
+CONFIG_OPSEC_HMAC_TOPIC=y
+CONFIG_OPSEC_TOTP=y
+CONFIG_OPSEC_TOTP_DIGITS=6
+CONFIG_OPSEC_TOTP_STEP_SEC=30
