@@ -172,7 +172,7 @@ esp_err_t wifi_sta_connect(void)
     /* Initialise WiFi driver if identity.c hasn't already done so */
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
     err = esp_wifi_init(&cfg);
-    if (err != ESP_OK && err != ESP_ERR_WIFI_INIT_STATE)
+    if (err != ESP_OK && err != ESP_ERR_INVALID_STATE)
     {
         return err;
     }
