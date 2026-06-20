@@ -36,7 +36,7 @@ static esp_netif_t *s_sta_netif = NULL;
  * the last successful IP assignment. Zero means we are not in a
  * disconnected state (or have never connected). */
 static int64_t s_disconnect_start_time = 0;
-static bool s_has_connected_once = false;
+static volatile bool s_has_connected_once = false;
 static bool s_is_tracking_disconnect = false;
 
 /* --------------------------------------------------------------------------
