@@ -168,6 +168,13 @@ After dispatching a magic packet, Heimdall publishes a confirmation to the respo
 }
 ```
 
+| Field | Description |
+|---|---|
+| `mac` | The target MAC address that the Wake-on-LAN magic packet was dispatched to. |
+| `status` | Confirmation that the packet was successfully broadcast to the local network. |
+| `free_heap` | The available RAM on the ESP32 in bytes. Useful for monitoring device health. |
+| `uptime_s` | Total time the ESP32 has been continuously running in seconds since the last reboot. |
+
 ---
 
 <div align="center">
