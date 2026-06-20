@@ -101,8 +101,8 @@ On first boot, Heimdall creates a WiFi access point. Connect to it — your devi
 **3. Send a wake command**
 
 Publish a payload to Heimdall's command topic:
-```json
-{ "mac": "AA:BB:CC:DD:EE:FF" }
+```text
+AA:BB:CC:DD:EE:FF
 ```
 
 Your machine wakes up.
@@ -139,7 +139,7 @@ After dispatching a magic packet, Heimdall publishes a confirmation to the respo
 {
   "mac": "AA:BB:CC:DD:EE:FF",
   "status": "sent",
-  "heap_free": 187432,
+  "free_heap": 187432,
   "uptime_s": 3672
 }
 ```
