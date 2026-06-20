@@ -21,7 +21,6 @@
 #include "esp_sntp.h"
 #include "identity.h"
 #endif /* CONFIG_IDF_TARGET_LINUX */
-#define MBEDTLS_DECLARE_PRIVATE_IDENTIFIERS
 #include "mbedtls/md.h"
 #include "storage.h"
 #include "opsec.h"
@@ -37,7 +36,7 @@ static uint8_t s_hmac_secret[STORAGE_HMAC_SECRET_LEN];
 static uint8_t s_totp_seed[STORAGE_TOTP_SEED_LEN];
 #endif
 static bool s_initialised = false;
-static bool s_clock_synced = false;
+static volatile bool s_clock_synced = false;
 
 /* --------------------------------------------------------------------------
  * SNTP callback

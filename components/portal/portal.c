@@ -416,7 +416,17 @@ static esp_err_t handle_provision(httpd_req_t *req)
     }
 
     j = cJSON_GetObjectItem(json, "mqtt_url");
-    if (!cJSON_IsString(j) || strlen(j->valuestring) == 0 || strlen(j->valuestring) > STORAGE_MQTT_URL_MAX)
+    bool valid_url = false;
+    if (cJSON_IsString(j) && strlen(j->valuestring) > 0 && strlen(j->valuestring) <= STORAGE_MQTT_URL_MAX) {
+        valid_url = true;
+        for (int i = 0; j->valuestring[i] != '\0'; i++) {
+            if (isspace((unsigned char)j->valuestring[i]) || iscntrl((unsigned char)j->valuestring[i])) {
+                valid_url = false;
+                break;
+            }
+        }
+    }
+    if (!valid_url)
     {
         cJSON_Delete(json);
         cJSON *err = cJSON_CreateObject();

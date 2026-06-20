@@ -29,6 +29,7 @@ static const char *TAG = "identity";
 /* Cached values set once during identity_apply() */
 static uint8_t s_effective_mac[6] = {0};
 static char s_effective_hostname[33] = {0}; /* max 32 chars + null */
+static bool s_identity_applied = false;
 
 /* --------------------------------------------------------------------------
  * Internal helpers
@@ -206,10 +207,15 @@ apply_mac_spoof:
 #if !CONFIG_OPSEC_IDENTITY_SPOOF_MAC && !CONFIG_OPSEC_IDENTITY_FAKE_HOSTNAME
     ESP_LOGD(TAG, "Identity obfuscation disabled (STANDARD build)");
 #endif
+    s_identity_applied = true;
 }
 
 esp_err_t identity_get_mac(uint8_t mac[6])
 {
+    if (!s_identity_applied) {
+        ESP_LOGE(TAG, "identity_get_mac() called before identity_apply()!");
+        return ESP_ERR_INVALID_STATE;
+    }
     memcpy(mac, s_effective_mac, 6);
     return ESP_OK;
 }
