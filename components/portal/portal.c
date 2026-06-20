@@ -446,12 +446,30 @@ static esp_err_t handle_provision(httpd_req_t *req)
     creds.mqtt_port = cJSON_IsNumber(j) ? (uint16_t)j->valuedouble : 8883;
 
     j = cJSON_GetObjectItem(json, "mqtt_user");
-    if (cJSON_IsString(j))
+    if (cJSON_IsString(j)) {
+        if (strlen(j->valuestring) > STORAGE_MQTT_USER_MAX) {
+            cJSON_Delete(json);
+            cJSON *err = cJSON_CreateObject();
+            cJSON_AddStringToObject(err, "error", "MQTT username too long");
+            esp_err_t r = send_json(req, err, 400);
+            cJSON_Delete(err);
+            return r;
+        }
         strncpy(creds.mqtt_user, j->valuestring, STORAGE_MQTT_USER_MAX);
+    }
 
     j = cJSON_GetObjectItem(json, "mqtt_pass");
-    if (cJSON_IsString(j))
+    if (cJSON_IsString(j)) {
+        if (strlen(j->valuestring) > STORAGE_MQTT_PASS_MAX) {
+            cJSON_Delete(json);
+            cJSON *err = cJSON_CreateObject();
+            cJSON_AddStringToObject(err, "error", "MQTT password too long");
+            esp_err_t r = send_json(req, err, 400);
+            cJSON_Delete(err);
+            return r;
+        }
         strncpy(creds.mqtt_pass, j->valuestring, STORAGE_MQTT_PASS_MAX);
+    }
 
     /* Optional hostname field — validate if present, reject with 400 if invalid */
     char validated_hostname[STORAGE_HOSTNAME_MAX + 1] = {0};

@@ -102,6 +102,8 @@ On first boot, Heimdall creates a WiFi access point. Connect to it — your devi
   <img src="resources/Portal.png" alt="Heimdall Captive Portal Configuration" width="400"/>
 </div>
 
+After saving, the device reboots into relay mode. Use the successful startup log below to confirm WiFi, TLS, and MQTT are all working.
+
 **3. Send a wake command**
 
 Publish a payload to Heimdall's command topic:
@@ -113,7 +115,7 @@ Your machine wakes up.
 
 ---
 
-## ✦ Example Boot Sequence
+## ✦ First Provisioning Boot
 
 ```console
 I (645) main: Not provisioned — starting captive portal
@@ -130,6 +132,35 @@ I (123618) storage: Credentials saved successfully
 I (123619) storage: Hostname saved: test-relay-name
 I (137113) portal: Credentials saved — rebooting into relay mode
 ```
+
+---
+
+## ✦ Successful Relay Startup
+
+After provisioning valid WiFi and MQTT credentials, the next reboot should move past the portal and into relay mode. The important success markers are: WiFi gets an IP address, TLS validates the broker certificate, MQTT connects, and the command topic subscription is confirmed.
+
+<div align="center">
+  <img src="resources/relay-start.jpeg" alt="Heimdall relay startup serial monitor output" width="360"/>
+</div>
+
+```console
+I (646) identity: Hostname loaded from NVS: test-relay
+I (649) main: Credentials found — starting relay
+I (2875) wifi_sta: Got IP: 192.168.1.11
+I (2876) main: WiFi connected
+I (2879) main: Starting MQTT relay
+I (2881) opsec: Command  topic: wol/78:1C:3C:A8:DC:70
+I (2885) opsec: Response topic: wol/78:1C:3C:A8:DC:70/r
+I (2893) mqtt_relay: Connecting to MQTT broker: mqtts://<cluster>.hivemq.cloud:8883
+I (2900) mqtt_relay: MQTT credential lengths: username=6 password=14
+I (2906) mqtt_relay: TLS hostname verification/SNI: enabled via broker URI hostname
+I (2917) mqtt_relay: MQTT client started — relay is active
+I (3702) esp-x509-crt-bundle: Certificate validated
+I (4895) mqtt_relay: MQTT connected — subscribing to: wol/78:1C:3C:A8:DC:70
+I (5002) mqtt_relay: Subscription confirmed (msg_id=22951)
+```
+
+If the log reaches `MQTT connected` and `Subscription confirmed`, Heimdall is online and waiting for wake commands on the command topic shown above.
 
 > 📁 For detailed configuration, security hardening, TOTP setup, and OTA instructions — see the [`/docs`](docs/) folder.
 
@@ -149,6 +180,7 @@ Heimdall/
 │   ├── wifi_sta/       # WiFi station with self-healing
 │   └── wol/            # Magic packet builder & broadcaster
 ├── main/               # Boot sequence & orchestration
+├── resources/          # README images and visual design assets
 ├── partitions.csv      # OTA-ready dual-slot partition table
 └── sdkconfig.defaults  # Baseline Kconfig configuration
 ```

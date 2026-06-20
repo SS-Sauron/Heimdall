@@ -34,15 +34,15 @@ menu "MQTT Relay"
 
     config MQTT_RELAY_SKIP_CERT_CN_CHECK
         bool "Skip TLS certificate common name check"
-        default y
+        default n
         help
             When enabled, the ESP32 does not verify that the broker's
             TLS certificate common name matches the broker hostname.
-            This is required for most hosted MQTT brokers that use
-            wildcard certificates or SNI.
+            This also disables TLS Server Name Indication (SNI), so it
+            should not be used with hosted MQTT brokers such as HiveMQ
+            Cloud.
 
-            Disable only if you are running your own MQTT broker with
-            a certificate whose CN exactly matches the hostname stored
-            in NVS.
+            Enable only for loopback/debug brokers where hostname
+            authentication and SNI are intentionally unnecessary.
 
 endmenu

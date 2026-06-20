@@ -232,6 +232,14 @@ void mqtt_relay_start(void)
     char broker_uri[STORAGE_MQTT_URL_MAX + 16];
     build_broker_uri(&creds, broker_uri, sizeof(broker_uri));
     ESP_LOGI(TAG, "Connecting to MQTT broker: %s", broker_uri);
+    ESP_LOGI(TAG, "MQTT credential lengths: username=%u password=%u",
+             (unsigned)strlen(creds.mqtt_user),
+             (unsigned)strlen(creds.mqtt_pass));
+#if CONFIG_MQTT_RELAY_SKIP_CERT_CN_CHECK
+    ESP_LOGW(TAG, "TLS hostname verification/SNI: disabled by config");
+#else
+    ESP_LOGI(TAG, "TLS hostname verification/SNI: enabled via broker URI hostname");
+#endif
 
     /* ------------------------------------------------------------------
      * Step 5: Configure esp_mqtt_client
