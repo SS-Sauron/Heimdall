@@ -154,16 +154,7 @@ Your machine wakes up.
 
 Publish a different target MAC to the same command topic to wake a different WoL-capable device on the same LAN. Heimdall does not store a single target PC MAC; the payload selects the target for each command.
 
-> In HARDENED builds with TOTP enabled, the payload must include a valid time-based code. See [TOTP Setup](#-totp-setup-hardened-only).
-
-The repository also includes MQTT helper scripts:
-
-```bash
-./scripts/wake_standard.sh mqtt.example.net 8883 "wol/<device-mac>" AA:BB:CC:DD:EE:FF <mqtt-user> <mqtt-pass>
-./scripts/wake_hardened.sh mqtt.example.net 8883 "<16-character-hmac-topic>" AA:BB:CC:DD:EE:FF "<totp-base32-secret>" <mqtt-user> <mqtt-pass>
-```
-
-Use the STANDARD script with the readable `wol/<device-mac>` topic. Use the HARDENED script with the opaque topic and the Base32 TOTP seed or quoted `otpauth://` URI shown once by the portal. Passing MQTT passwords on the command line can expose them to local process listings, so use these scripts as a starting point for your own automation.
+> See the **[Usage & Operation](#-usage--operation)** section below for details on how to use the provided bash scripts to automate this, and how to find your specific command topic.
 
 ---
 
@@ -235,7 +226,16 @@ If the log reaches `MQTT connected` and `Subscription confirmed`, Heimdall is on
 
 ---
 
-## ✦ Finding Your Command Topic
+## ✦ Usage & Operation
+
+Once Heimdall is successfully provisioned and connected to your MQTT broker, you can start sending wake commands. 
+
+> [!IMPORTANT]
+> **Don't mix up your MAC addresses!**
+> - **Topic MAC:** The MAC address of the *Heimdall ESP32 device*. This defines *where* the command is sent.
+> - **Payload MAC:** The MAC address of the *Sleeping PC* you want to wake. This defines *what* is woken up.
+
+### Finding Your Command Topic
 
 The topic Heimdall subscribes to depends on the selected build profile.
 
@@ -246,9 +246,7 @@ Command:  wol/<device-mac>
 Response: wol/<device-mac>/r
 ```
 
-`<device-mac>` is the ESP32 station MAC printed in the serial monitor. Do not use the target PC's MAC in the topic; the target PC's MAC goes in the payload.
-
-Because the target MAC is payload-driven, one Heimdall relay can wake multiple WoL-capable machines on the same LAN broadcast domain. Send the same command topic with a different target MAC for each machine.
+`<device-mac>` is the ESP32 station MAC printed in the serial monitor.
 
 **HARDENED build**
 
@@ -257,13 +255,27 @@ Command:  <16-character-hmac-topic>
 Response: <16-character-hmac-response-topic>
 ```
 
-HARDENED topics are derived from the device MAC and a secret generated during provisioning. They are printed to the serial monitor during relay startup and should be copied into your trigger script.
+HARDENED topics are opaque strings derived from the device MAC and a secret generated during provisioning. They are printed to the serial monitor during relay startup.
 
-For scripted publishes, use `scripts/wake_standard.sh` in STANDARD builds and `scripts/wake_hardened.sh` in HARDENED builds. The hardened script accepts the Base32 TOTP seed or the `otpauth://` URI from the one-time portal secrets page.
+### Using the Trigger Scripts
 
----
+The repository includes ready-to-use Bash scripts that format the MQTT payload and handle the `mosquitto_pub` command for you.
 
-## ✦ Response Payload
+**Prerequisites:** You must have `mosquitto-clients` installed (and `oathtool` if using the hardened script).
+
+**STANDARD Script Usage:**
+```bash
+./scripts/wake_standard.sh <broker> <port> <topic> <target-mac> [user] [pass]
+```
+*Example:* `./scripts/wake_standard.sh mqtt.example.com 8883 "wol/AA:BB:CC:11:22:33" 99:88:77:66:55:44`
+
+**HARDENED Script Usage (with TOTP):**
+```bash
+./scripts/wake_hardened.sh <broker> <port> <topic> <target-mac> <totp-secret> [user] [pass]
+```
+*Example:* `./scripts/wake_hardened.sh mqtt.example.com 8883 "a1b2c3d4e5f6g7h8" 99:88:77:66:55:44 "JBSWY3DPEHPK3PXP"`
+
+### Response Payload
 
 After dispatching a magic packet, Heimdall publishes a confirmation to the response topic:
 
@@ -283,9 +295,7 @@ After dispatching a magic packet, Heimdall publishes a confirmation to the respo
 | `free_heap` | The available RAM on the ESP32 in bytes. Useful for monitoring device health. |
 | `uptime_s` | Total time the ESP32 has been continuously running in seconds since the last reboot. |
 
----
-
-## ✦ TOTP Setup (HARDENED only)
+### TOTP Setup (HARDENED only)
 
 When TOTP is enabled, every wake command must append a valid 6-digit time-based code to the target MAC address:
 
@@ -293,9 +303,24 @@ When TOTP is enabled, every wake command must append a valid 6-digit time-based 
 AA:BB:CC:DD:EE:FF:123456
 ```
 
-The TOTP seed is generated during provisioning and shown once on the portal secrets page as a Base32 value plus an `otpauth://` URI. Save it immediately; it is not printed again. If it is lost, factory reset and reprovision the device to generate a new seed.
+The TOTP seed is generated during provisioning and shown **once** on the portal secrets page as a Base32 value plus an `otpauth://` URI. Save it immediately. If it is lost, factory reset and reprovision the device to generate a new seed.
 
-Any RFC 6238-compatible authenticator app or trigger script can generate codes from that seed. See [`docs/README.md`](docs/README.md) for the full hardened-mode and payload details.
+Any RFC 6238-compatible authenticator app or trigger script can generate codes from that seed.
+
+---
+
+## ✦ Over-The-Air (OTA) Updates
+
+Heimdall supports dual-slot OTA updates with automatic rollback. You don't need to plug the ESP32 into your computer to update the firmware.
+
+If `CONFIG_OTA_ALLOW_HTTP=y` is enabled in your `sdkconfig.defaults`, you can flash a new build over your local network using the provided script:
+
+```bash
+./scripts/ota_push.sh <esp32-ip-address> build/wol_relay.bin
+```
+
+> [!WARNING]
+> The OTA transport is plain HTTP (port 3232) and should only be used on a trusted local network. If the new firmware crashes upon boot, the ESP32 will automatically reboot and roll back to the previous working firmware slot.
 
 ---
 
