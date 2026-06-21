@@ -480,6 +480,35 @@ On each boot, if `esp_reset_reason()` is `ESP_RST_PANIC` or `ESP_RST_TASK_WDT`, 
 
 ---
 
+## OTA Updates
+
+Heimdall supports over-the-air (OTA) updates. The partition table is dual-slot (`ota_0` and `ota_1`).
+
+**Rollback Protection:** When a new firmware is flashed, the bootloader boots from the new slot. The firmware must explicitly prove it is functional before the bootloader makes the change permanent. Heimdall does this in `mqtt_relay.c` by calling `esp_ota_mark_app_valid_cancel_rollback()` *only after* successfully connecting to the MQTT broker and subscribing to the command topic. If the new firmware crashes or cannot reach the broker, the bootloader automatically rolls back to the previous known-good slot on the next reboot.
+
+### How to update
+
+**Prerequisites:**
+- The device must be online and reachable on your local network.
+- `CONFIG_OTA_ALLOW_HTTP=y` must be enabled in your build (it is on by default).
+- You must have ESP-IDF sourced in your shell (`. $IDF_PATH/export.sh`).
+
+**1. Build the new firmware**
+```bash
+idf.py build
+```
+
+**2. Push to the device**
+Use the provided OTA helper script. Pass the device's IP address:
+```bash
+./scripts/ota_push.sh --host 192.168.1.42
+```
+The script uses ESP-IDF's `espota.py` to transfer the binary over plain HTTP on port 3232.
+
+> **Warning:** Because the transport is unencrypted HTTP, you should only use this on a trusted local network. Do not expose port 3232 to the internet.
+
+---
+
 
 ## NVS Storage Schema
 

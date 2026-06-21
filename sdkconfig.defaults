@@ -69,6 +69,10 @@ CONFIG_BOOTLOADER_LOG_LEVEL_WARN=y
 # Enable rollback so a failed firmware update reverts to the previous slot.
 # -----------------------------------------------------------------------------
 CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y
+# Allow plain-HTTP OTA source for local-network updates via scripts/ota_push.sh.
+# Transport is espota.py on TCP port 3232 — only use on a trusted LAN.
+CONFIG_OTA_ALLOW_HTTP=y
+
 
 # -----------------------------------------------------------------------------
 # WoL Relay build profile (defined in main/Kconfig.projbuild)
