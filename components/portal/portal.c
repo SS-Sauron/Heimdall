@@ -4,7 +4,8 @@
  * Captive portal implementation.
  *
  * HTTP endpoints served:
- *   GET  /                       → index.html (the configuration form)
+ *   GET  /                       → login page, then index.html after login
+ *   POST /login                  → unlock RAM-only portal session
  *   GET  /api/scan               → JSON array of visible SSIDs
  *   POST /api/provision          → validate + save credentials, reboot
  *
@@ -44,8 +45,10 @@
 #include "esp_mac.h"
 #include "esp_http_server.h"
 #include "esp_random.h"
+#include "esp_system.h"
 #include "cJSON.h"
 #include "mbedtls/md.h"
+#include "psa/crypto.h"
 #include "dns_server.h"
 #include "identity.h"
 #include "storage.h"
@@ -64,24 +67,135 @@ static void portal_timeout_callback(void* arg) {
     esp_restart();
 }
 
-/* Embedded HTML (placed in firmware flash via EMBED_FILES in CMakeLists) */
+/* Embedded HTML. index.html keeps the existing EMBED_FILES symbol names.
+ * The smaller pages use EMBED_TXTFILES and include an appended null byte. */
 extern const char index_html_start[] asm("_binary_index_html_start");
 extern const char index_html_end[] asm("_binary_index_html_end");
+extern const uint8_t login_html_start[] asm("_binary_login_html_start");
+extern const uint8_t login_html_end[] asm("_binary_login_html_end");
+extern const uint8_t secrets_html_start[] asm("_binary_secrets_html_start");
+extern const uint8_t secrets_html_end[] asm("_binary_secrets_html_end");
+extern const uint8_t rebooting_html_start[] asm("_binary_rebooting_html_start");
+extern const uint8_t rebooting_html_end[] asm("_binary_rebooting_html_end");
 
 /* Event bit set when the user successfully submits credentials */
 #define PORTAL_CRED_SAVED_BIT BIT0
 static EventGroupHandle_t s_portal_events = NULL;
+static bool s_portal_authenticated = false;
+static char s_portal_password[9] = {0};
 
 /* SoftAP default IP assigned by ESP-IDF */
 #define SOFTAP_IP "192.168.4.1"
+#define PORTAL_PASSWORD_LEN 8
+#define PORTAL_LOGIN_BODY_MAX 64
+#define PORTAL_PASSWORD_KEY "heimdall-portal"
+#define PORTAL_PASSWORD_KEY_LEN 15
+#define SECRETS_PAGE_BUF_SIZE 4096
+
+static char s_secrets_page_buf[SECRETS_PAGE_BUF_SIZE];
+
+/* --------------------------------------------------------------------------
+ * Permanent portal password derivation
+ *
+ * key  = "heimdall-portal" (15 bytes, no null terminator)
+ * data = factory eFuse MAC (6 bytes)
+ * pass = first 4 bytes of HMAC-SHA256, uppercase hex
+ * -------------------------------------------------------------------------- */
+esp_err_t portal_derive_password(char out[9])
+{
+    if (out == NULL)
+        return ESP_ERR_INVALID_ARG;
+
+    out[0] = '\0';
+
+    uint8_t efuse_mac[6] = {0};
+    esp_err_t err = esp_read_mac(efuse_mac, ESP_MAC_EFUSE_FACTORY);
+    if (err != ESP_OK)
+    {
+        ESP_LOGE(TAG, "Failed to read eFuse factory MAC: %s", esp_err_to_name(err));
+        return err;
+    }
+
+    psa_status_t status = psa_crypto_init();
+    if (status != PSA_SUCCESS)
+    {
+        ESP_LOGE(TAG, "PSA crypto init failed: %d", (int)status);
+        return ESP_FAIL;
+    }
+
+    psa_key_attributes_t attributes = PSA_KEY_ATTRIBUTES_INIT;
+    psa_key_id_t key_id = 0;
+
+    psa_set_key_usage_flags(&attributes, PSA_KEY_USAGE_SIGN_MESSAGE);
+    psa_set_key_algorithm(&attributes, PSA_ALG_HMAC(PSA_ALG_SHA_256));
+    psa_set_key_type(&attributes, PSA_KEY_TYPE_HMAC);
+    psa_set_key_bits(&attributes, PORTAL_PASSWORD_KEY_LEN * 8);
+    psa_set_key_lifetime(&attributes, PSA_KEY_LIFETIME_VOLATILE);
+
+    status = psa_import_key(&attributes,
+                            (const uint8_t *)PORTAL_PASSWORD_KEY,
+                            PORTAL_PASSWORD_KEY_LEN,
+                            &key_id);
+    psa_reset_key_attributes(&attributes);
+    if (status != PSA_SUCCESS)
+    {
+        ESP_LOGE(TAG, "PSA portal key import failed: %d", (int)status);
+        return ESP_FAIL;
+    }
+
+    uint8_t digest[32] = {0};
+    size_t mac_len = 0;
+    status = psa_mac_compute(key_id,
+                             PSA_ALG_HMAC(PSA_ALG_SHA_256),
+                             efuse_mac,
+                             sizeof(efuse_mac),
+                             digest,
+                             sizeof(digest),
+                             &mac_len);
+
+    psa_status_t destroy_status = psa_destroy_key(key_id);
+    if (status != PSA_SUCCESS)
+    {
+        ESP_LOGE(TAG, "PSA portal HMAC compute failed: %d", (int)status);
+        if (destroy_status != PSA_SUCCESS)
+        {
+            ESP_LOGE(TAG, "PSA portal key destroy failed after compute error: %d",
+                     (int)destroy_status);
+        }
+        return ESP_FAIL;
+    }
+    if (destroy_status != PSA_SUCCESS)
+    {
+        ESP_LOGE(TAG, "PSA portal key destroy failed: %d", (int)destroy_status);
+        return ESP_FAIL;
+    }
+    if (mac_len != sizeof(digest))
+    {
+        ESP_LOGE(TAG, "PSA portal HMAC length mismatch: got %u expected %u",
+                 (unsigned)mac_len, (unsigned)sizeof(digest));
+        return ESP_FAIL;
+    }
+
+    int written = snprintf(out, PORTAL_PASSWORD_LEN + 1,
+                           "%02X%02X%02X%02X",
+                           digest[0], digest[1], digest[2], digest[3]);
+    if (written != PORTAL_PASSWORD_LEN)
+    {
+        out[0] = '\0';
+        ESP_LOGE(TAG, "Portal password formatting failed");
+        return ESP_FAIL;
+    }
+
+    return ESP_OK;
+}
 
 /* --------------------------------------------------------------------------
  * AP identity derivation
  *
  * SSID  : CONFIG_PORTAL_AP_SSID_PREFIX + upper-hex(SHA256(MAC)[0..2])
- * Pass  : lower-hex(SHA256(MAC)[3..8])   (12 chars, alphanumeric-ish)
+ * Pass  : derived separately from the eFuse MAC by portal_derive_password()
  * -------------------------------------------------------------------------- */
-static void derive_ap_credentials(char ssid_out[33], char pass_out[13])
+static void derive_ap_ssid(char ssid_out[33])
 {
     uint8_t mac[6];
     identity_get_mac(mac); /* spoofed MAC if OPSEC_IDENTITY on */
@@ -96,7 +210,7 @@ static void derive_ap_credentials(char ssid_out[33], char pass_out[13])
         mbedtls_md_update(&ctx, mac, 6) != 0 ||
         mbedtls_md_finish(&ctx, digest) != 0)
     {
-        ESP_LOGE(TAG, "SHA-256 failed in derive_ap_credentials");
+        ESP_LOGE(TAG, "SHA-256 failed in derive_ap_ssid");
         mbedtls_md_free(&ctx);
         memcpy(digest, mac, 6);
     }
@@ -109,15 +223,6 @@ static void derive_ap_credentials(char ssid_out[33], char pass_out[13])
     snprintf(ssid_out, 33, "%s%02X%02X%02X",
              CONFIG_PORTAL_AP_SSID_PREFIX,
              digest[0], digest[1], digest[2]);
-
-#if CONFIG_PORTAL_AP_PASSWORD_FROM_MAC
-    /* Password: bytes 3..8 of digest as lowercase hex (12 chars) */
-    snprintf(pass_out, 13, "%02x%02x%02x%02x%02x%02x",
-             digest[3], digest[4], digest[5],
-             digest[6], digest[7], digest[8]);
-#else
-    pass_out[0] = '\0'; /* open AP */
-#endif
 }
 
 /* --------------------------------------------------------------------------
@@ -127,6 +232,12 @@ static esp_netif_t *s_ap_netif = NULL;
 
 static void start_softap(const char *ssid, const char *password)
 {
+    if (password == NULL || strlen(password) != PORTAL_PASSWORD_LEN)
+    {
+        ESP_LOGE(TAG, "Refusing to start portal without a valid derived password");
+        esp_restart();
+    }
+
     if (s_ap_netif == NULL)
     {
         s_ap_netif = esp_netif_get_handle_from_ifkey("WIFI_AP_DEF");
@@ -146,9 +257,7 @@ static void start_softap(const char *ssid, const char *password)
         .ap = {
             .channel = CONFIG_PORTAL_AP_CHANNEL,
             .max_connection = CONFIG_PORTAL_AP_MAX_CONN,
-            .authmode = (password[0] != '\0')
-                            ? WIFI_AUTH_WPA2_PSK
-                            : WIFI_AUTH_OPEN,
+            .authmode = WIFI_AUTH_WPA2_PSK,
             .pmf_cfg = {.required = false},
         }};
     strncpy((char *)ap_config.ap.ssid, ssid, sizeof(ap_config.ap.ssid) - 1);
@@ -186,8 +295,8 @@ static void start_softap(const char *ssid, const char *password)
                                            (uint32_t)strlen(captive_url)));
     ESP_ERROR_CHECK_WITHOUT_ABORT(esp_netif_dhcps_start(s_ap_netif));
 
-    ESP_LOGI(TAG, "SoftAP started  SSID: %s  Auth: %s  DHCP opt-114: %s",
-             ssid, password[0] ? "WPA2" : "OPEN", captive_url);
+    ESP_LOGI(TAG, "SoftAP started  SSID: %s  Auth: WPA2  DHCP opt-114: %s",
+             ssid, captive_url);
 }
 
 /* --------------------------------------------------------------------------
@@ -198,7 +307,6 @@ static esp_err_t send_json(httpd_req_t *req, cJSON *root, int http_status)
     char *body = cJSON_PrintUnformatted(root);
     httpd_resp_set_status(req, http_status == 200 ? "200 OK" : "400 Bad Request");
     httpd_resp_set_type(req, "application/json");
-    httpd_resp_set_hdr(req, "Cache-Control", "no-store");
     esp_err_t ret = httpd_resp_sendstr(req, body ? body : "{}");
     free(body);
     return ret;
@@ -208,21 +316,222 @@ static esp_err_t send_json(httpd_req_t *req, cJSON *root, int http_status)
  * HTTP handlers
  * -------------------------------------------------------------------------- */
 
+static void portal_touch_timeout(void)
+{
+    if (s_portal_timeout_timer != NULL)
+    {
+        esp_timer_restart(s_portal_timeout_timer, 300ULL * 1000000ULL);
+    }
+}
+
+static size_t embedded_txt_len(const uint8_t *start, const uint8_t *end)
+{
+    size_t total_len = (size_t)(end - start);
+    return total_len > 0 ? total_len - 1 : 0;
+}
+
+static esp_err_t send_embedded_txt_page(httpd_req_t *req,
+                                        const char *status,
+                                        const uint8_t *start,
+                                        const uint8_t *end)
+{
+    size_t html_len = embedded_txt_len(start, end);
+    if (html_len == 0)
+    {
+        ESP_LOGE(TAG, "Embedded HTML template is empty");
+        httpd_resp_send_500(req);
+        return ESP_FAIL;
+    }
+
+    if (status != NULL)
+    {
+        httpd_resp_set_status(req, status);
+    }
+    httpd_resp_set_type(req, "text/html");
+    return httpd_resp_send(req, (const char *)start, (ssize_t)html_len);
+}
+
+static esp_err_t send_login_page(httpd_req_t *req,
+                                 const char *status,
+                                 const char *message)
+{
+    (void)message;
+    return send_embedded_txt_page(req, status,
+                                  login_html_start, login_html_end);
+}
+
+static esp_err_t replace_placeholder_once(char *buf,
+                                          size_t *len,
+                                          const char *placeholder,
+                                          const char *replacement)
+{
+    char *pos = strstr(buf, placeholder);
+    if (pos == NULL)
+    {
+        ESP_LOGE(TAG, "Missing secrets page placeholder: %s", placeholder);
+        return ESP_FAIL;
+    }
+
+    size_t placeholder_len = strlen(placeholder);
+    size_t replacement_len = replacement ? strlen(replacement) : 0;
+    size_t prefix_len = (size_t)(pos - buf);
+    size_t suffix_len = *len - prefix_len - placeholder_len;
+    size_t new_len = *len - placeholder_len + replacement_len;
+
+    if (new_len >= SECRETS_PAGE_BUF_SIZE)
+    {
+        ESP_LOGE(TAG, "Secrets page exceeds %u bytes after replacing %s",
+                 (unsigned)SECRETS_PAGE_BUF_SIZE, placeholder);
+        return ESP_ERR_NO_MEM;
+    }
+
+    memmove(pos + replacement_len, pos + placeholder_len, suffix_len);
+    if (replacement_len > 0)
+    {
+        memcpy(pos, replacement, replacement_len);
+    }
+    *len = new_len;
+    buf[*len] = '\0';
+    return ESP_OK;
+}
+
+static esp_err_t send_secrets_page(httpd_req_t *req,
+                                   const char *hmac_secret,
+                                   const char *totp_b32,
+                                   const char *otp_uri)
+{
+    char *buf = s_secrets_page_buf;
+    memset(buf, 0, SECRETS_PAGE_BUF_SIZE);
+
+    size_t template_len = embedded_txt_len(secrets_html_start, secrets_html_end);
+    if (template_len == 0 || template_len >= SECRETS_PAGE_BUF_SIZE)
+    {
+        ESP_LOGE(TAG, "Secrets page template does not fit in %u bytes",
+                 (unsigned)SECRETS_PAGE_BUF_SIZE);
+        return ESP_ERR_NO_MEM;
+    }
+
+    memcpy(buf, secrets_html_start, template_len);
+    size_t filled_len = template_len;
+    buf[filled_len] = '\0';
+
+    esp_err_t err = replace_placeholder_once(buf, &filled_len,
+                                             "{{HMAC_SECRET}}",
+                                             hmac_secret ? hmac_secret : "");
+    if (err != ESP_OK)
+        goto cleanup;
+
+    err = replace_placeholder_once(buf, &filled_len,
+                                   "{{TOTP_B32}}",
+                                   totp_b32 ? totp_b32 : "");
+    if (err != ESP_OK)
+        goto cleanup;
+
+    err = replace_placeholder_once(buf, &filled_len,
+                                   "{{OTP_URI}}",
+                                   otp_uri ? otp_uri : "");
+    if (err != ESP_OK)
+        goto cleanup;
+
+    httpd_resp_set_type(req, "text/html");
+    httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+    err = httpd_resp_send(req, buf, (ssize_t)filled_len);
+
+cleanup:
+    memset(buf, 0, SECRETS_PAGE_BUF_SIZE);
+    return err;
+}
+
+static esp_err_t require_authenticated(httpd_req_t *req)
+{
+    if (s_portal_authenticated)
+        return ESP_OK;
+
+    return send_login_page(req, "401 Unauthorized", "Portal password required.");
+}
+
+static bool extract_login_password(const char *body, char out[9])
+{
+    if (body == NULL || out == NULL)
+        return false;
+
+    const char *p = strstr(body, "password=");
+    if (p == NULL)
+        return false;
+
+    p += strlen("password=");
+    size_t len = 0;
+    while (p[len] != '\0' && p[len] != '&' && len < PORTAL_PASSWORD_LEN)
+    {
+        out[len] = p[len];
+        len++;
+    }
+    out[len] = '\0';
+
+    return len == PORTAL_PASSWORD_LEN &&
+           (p[len] == '\0' || p[len] == '&');
+}
+
 /* GET / — serve the embedded HTML form */
 static esp_err_t handle_root(httpd_req_t *req)
 {
-    if (s_portal_timeout_timer != NULL) {
-        esp_timer_restart(s_portal_timeout_timer, 300ULL * 1000000ULL);
+    portal_touch_timeout();
+
+    if (!s_portal_authenticated)
+    {
+        return send_login_page(req, NULL, NULL);
     }
+
     size_t html_len = (size_t)(index_html_end - index_html_start);
     httpd_resp_set_type(req, "text/html");
-    httpd_resp_set_hdr(req, "Cache-Control", "no-store");
     return httpd_resp_send(req, index_html_start, (ssize_t)html_len);
+}
+
+/* POST /login — unlock the RAM-only portal session */
+static esp_err_t handle_login(httpd_req_t *req)
+{
+    portal_touch_timeout();
+
+    size_t content_len = req->content_len;
+    if (content_len == 0)
+    {
+        return send_login_page(req, "401 Unauthorized", "Portal password required.");
+    }
+    if (content_len > PORTAL_LOGIN_BODY_MAX)
+    {
+        httpd_resp_send_err(req, HTTPD_413_CONTENT_TOO_LARGE, "Login body too large");
+        return ESP_FAIL;
+    }
+
+    char body[PORTAL_LOGIN_BODY_MAX + 1] = {0};
+    int received = httpd_req_recv(req, body, content_len);
+    if (received < 0 || (size_t)received != content_len)
+    {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Incomplete body");
+        return ESP_FAIL;
+    }
+    body[received] = '\0';
+
+    char submitted[PORTAL_PASSWORD_LEN + 1] = {0};
+    if (!extract_login_password(body, submitted) ||
+        strcmp(submitted, s_portal_password) != 0)
+    {
+        return send_login_page(req, "401 Unauthorized", "Incorrect portal password.");
+    }
+
+    s_portal_authenticated = true;
+    httpd_resp_set_status(req, "303 See Other");
+    httpd_resp_set_hdr(req, "Location", "http://" SOFTAP_IP "/");
+    return httpd_resp_sendstr(req, "Portal unlocked");
 }
 
 /* GET /api/scan — return JSON array of visible SSIDs */
 static esp_err_t handle_scan(httpd_req_t *req)
 {
+    esp_err_t auth_err = require_authenticated(req);
+    if (auth_err != ESP_OK)
+        return auth_err;
+
     /* Perform a blocking WiFi scan */
     wifi_scan_config_t scan_cfg = {
         .ssid = NULL,
@@ -359,6 +668,12 @@ static void bytes_to_base32(const uint8_t *in, size_t in_len,
 /* POST /api/provision — parse, validate, save credentials, trigger reboot */
 static esp_err_t handle_provision(httpd_req_t *req)
 {
+    esp_err_t auth_err = require_authenticated(req);
+    if (auth_err != ESP_OK)
+        return auth_err;
+
+    portal_touch_timeout();
+
     /* Read the POST body */
     int content_len = req->content_len;
     if (content_len <= 0 || content_len > 768)
@@ -530,6 +845,10 @@ static esp_err_t handle_provision(httpd_req_t *req)
         }
     }
 
+    const char *hmac_secret_value = "";
+    const char *totp_b32_value = "";
+    const char *otp_uri_value = "";
+
 #if CONFIG_OPSEC_HMAC_TOPIC || CONFIG_OPSEC_TOTP
     uint8_t hmac_secret[STORAGE_HMAC_SECRET_LEN];
     esp_err_t secret_err = storage_load_or_generate_hmac_secret(hmac_secret);
@@ -541,7 +860,8 @@ static esp_err_t handle_provision(httpd_req_t *req)
     }
     char hmac_hex[STORAGE_HMAC_SECRET_LEN * 2 + 1];
     for (int i = 0; i < STORAGE_HMAC_SECRET_LEN; i++)
-        snprintf(hmac_hex + i * 2, 3, "%02x", hmac_secret[i]);
+        snprintf(hmac_hex + i * 2, 3, "%02X", hmac_secret[i]);
+    hmac_secret_value = hmac_hex;
 #endif
 
 #if CONFIG_OPSEC_TOTP
@@ -553,9 +873,6 @@ static esp_err_t handle_provision(httpd_req_t *req)
                             "Failed to load security credentials");
         return ESP_FAIL;
     }
-    char totp_hex[STORAGE_TOTP_SEED_LEN * 2 + 1];
-    for (int i = 0; i < STORAGE_TOTP_SEED_LEN; i++)
-        snprintf(totp_hex + i * 2, 3, "%02x", totp_seed[i]);
     /* Base32 for authenticator apps: 20 bytes → 32 chars + null */
     char totp_b32[33];
     bytes_to_base32(totp_seed, STORAGE_TOTP_SEED_LEN, totp_b32, sizeof(totp_b32));
@@ -563,82 +880,11 @@ static esp_err_t handle_provision(httpd_req_t *req)
     char otp_uri[128];
     snprintf(otp_uri, sizeof(otp_uri),
              "otpauth://totp/WoL-Relay?secret=%s&issuer=WoL-Relay", totp_b32);
+    totp_b32_value = totp_b32;
+    otp_uri_value = otp_uri;
 #endif
 
-    /* ----------------------------------------------------------------
-     * Build the HTML secrets page.
-     * The user MUST click the button to trigger the reboot — we do NOT
-     * call esp_restart() here or set the event bit here.
-     * ---------------------------------------------------------------- */
-    httpd_resp_set_type(req, "text/html");
-
-    /* Page header + warning banner */
-    httpd_resp_send_chunk(req,
-        "<!DOCTYPE html><html><head>"
-        "<meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
-        "<title>WoL Relay — Credentials Saved</title>"
-        "<style>"
-        "body{font-family:ui-sans-serif,system-ui,sans-serif;background:#050505;color:#e5e2e1;"
-        "margin:0;padding:32px 16px;opacity:0;animation:fadeIn 0.8s cubic-bezier(0.4,0,0.2,1) forwards;max-width:480px;margin-left:auto;margin-right:auto;}"
-        "@keyframes fadeIn{to{opacity:1}}"
-        "h1{font-family:ui-serif,Georgia,serif;font-size:2rem;font-weight:600;margin-bottom:8px;text-align:center;}"
-        ".subtitle{color:#d0c5af;text-align:center;margin-bottom:32px;line-height:1.6;}"
-        ".warn{background:rgba(212,175,55,0.05);border:1px solid #d4af37;border-radius:12px;"
-               "padding:16px;margin:16px 0 24px;font-size:.95rem;line-height:1.6;color:#d4af37;}"
-        ".box{background:#131313;border:1px solid #2d2d2d;border-radius:12px;padding:16px;margin:16px 0;}"
-        ".label{font-family:ui-monospace,monospace;font-size:.75rem;color:#d0c5af;text-transform:uppercase;"
-                "letter-spacing:.1em;margin-bottom:8px;}"
-        ".secret{font-family:ui-monospace,monospace;font-size:.9rem;word-break:break-all;"
-                 "background:#050505;padding:12px;border-radius:8px;border:1px solid #2d2d2d;color:#e5e2e1;}"
-        ".uri{font-family:ui-monospace,monospace;font-size:.75rem;color:#d0c5af;word-break:break-all;margin-top:8px;opacity:0.6;}"
-        ".btn{display:block;width:100%;padding:16px;margin-top:32px;"
-              "background:transparent;border:1px solid #d4af37;border-radius:9999px;"
-              "color:#d4af37;font-size:1rem;cursor:pointer;text-transform:uppercase;"
-              "letter-spacing:.1em;font-weight:500;transition:all 0.2s;}"
-        ".btn:hover{background:#d4af37;color:#050505;}"
-        "</style></head><body>"
-        "<h1>&#x2728; Ritual Complete</h1>"
-        "<div class=\"subtitle\">Network and MQTT settings have been written to flash.</div>"
-        "<div class=\"warn\">&#x26A0;&#xFE0F; <strong>Save these values now.</strong><br>"
-        "They will not be shown again. If you lose them you will need to "
-        "factory&#x2011;reset the device to generate new ones.</div>",
-        HTTPD_RESP_USE_STRLEN);
-
-#if CONFIG_OPSEC_HMAC_TOPIC || CONFIG_OPSEC_TOTP
-    /* HMAC secret box */
-    char hmac_chunk[256];
-    snprintf(hmac_chunk, sizeof(hmac_chunk),
-        "<div class=\"box\"><div class=\"label\">HMAC Secret &mdash; paste into your "
-        "trigger script&rsquo;s <code>HMAC_SECRET</code> variable</div>"
-        "<div class=\"secret\">%s</div></div>",
-        hmac_hex);
-    httpd_resp_send_chunk(req, hmac_chunk, HTTPD_RESP_USE_STRLEN);
-#endif
-
-#if CONFIG_OPSEC_TOTP
-    /* TOTP seed box */
-    char totp_chunk[512];
-    snprintf(totp_chunk, sizeof(totp_chunk),
-        "<div class=\"box\"><div class=\"label\">TOTP Seed &mdash; import into your "
-        "authenticator app or paste into your trigger script&rsquo;s <code>TOTP_SEED</code> variable</div>"
-        "<div class=\"secret\">%s</div>"
-        "<div class=\"uri\">%s</div></div>",
-        totp_b32, otp_uri);
-    httpd_resp_send_chunk(req, totp_chunk, HTTPD_RESP_USE_STRLEN);
-#endif
-
-    /* Confirmation button — POSTs to /reboot */
-    httpd_resp_send_chunk(req,
-        "<form method=\"POST\" action=\"/reboot\">"
-        "<button class=\"btn\" type=\"submit\">"
-        "I have saved my credentials &mdash; Start Relay</button>"
-        "</form>"
-        "</body></html>",
-        HTTPD_RESP_USE_STRLEN);
-
-    /* Terminate chunked transfer */
-    esp_err_t ret = httpd_resp_send_chunk(req, NULL, 0);
-    return ret;
+    return send_secrets_page(req, hmac_secret_value, totp_b32_value, otp_uri_value);
 }
 
 /* --------------------------------------------------------------------------
@@ -647,6 +893,12 @@ static esp_err_t handle_provision(httpd_req_t *req)
  * -------------------------------------------------------------------------- */
 static esp_err_t provisioned_get_handler(httpd_req_t *req)
 {
+    esp_err_t auth_err = require_authenticated(req);
+    if (auth_err != ESP_OK)
+        return auth_err;
+
+    portal_touch_timeout();
+
     httpd_resp_set_type(req, "text/html");
     return httpd_resp_sendstr(req,
         "<!DOCTYPE html><html><head>"
@@ -680,24 +932,16 @@ static esp_err_t provisioned_get_handler(httpd_req_t *req)
  * -------------------------------------------------------------------------- */
 static esp_err_t reboot_post_handler(httpd_req_t *req)
 {
-    httpd_resp_set_type(req, "text/html");
-    httpd_resp_sendstr(req,
-        "<!DOCTYPE html><html><head>"
-        "<meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
-        "<title>WoL Relay — Rebooting</title>"
-        "<style>"
-        "body{font-family:ui-sans-serif,system-ui,sans-serif;background:#050505;color:#e5e2e1;"
-              "margin:0;padding:32px 16px;text-align:center;max-width:480px;margin-left:auto;margin-right:auto;}"
-        "h1{font-family:ui-serif,Georgia,serif;font-size:2rem;font-weight:600;margin-bottom:8px;}"
-        "p{color:#d0c5af;line-height:1.6;}"
-        "</style></head><body>"
-        "<h1>&#x2728; Relay Starting&hellip;</h1>"
-        "<p>The device is rebooting and will connect to your WiFi network and MQTT broker.</p>"
-        "<p>You may close this page.</p>"
-        "</body></html>");
+    esp_err_t auth_err = require_authenticated(req);
+    if (auth_err != ESP_OK)
+        return auth_err;
+
+    esp_err_t ret = send_embedded_txt_page(req, NULL,
+                                           rebooting_html_start,
+                                           rebooting_html_end);
     /* Signal portal_start() — the event group unblocks and triggers restart */
     xEventGroupSetBits(s_portal_events, PORTAL_CRED_SAVED_BIT);
-    return ESP_OK;
+    return ret;
 }
 
 /* OS captive-portal detection: redirect everything else to the portal root.
@@ -755,6 +999,7 @@ static httpd_handle_t start_http_server(void)
 
     static const httpd_uri_t uris[] = {
         {.uri = "/", .method = HTTP_GET, .handler = handle_root},
+        {.uri = "/login", .method = HTTP_POST, .handler = handle_login},
         {.uri = "/api/scan", .method = HTTP_GET, .handler = handle_scan},
         {.uri = "/api/provision", .method = HTTP_POST, .handler = handle_provision},
         /* OS detection stubs */
@@ -791,16 +1036,20 @@ static httpd_handle_t start_http_server(void)
 void portal_start(void)
 {
     char ssid[33] = {0};
-    char pass[13] = {0};
-    derive_ap_credentials(ssid, pass);
+    derive_ap_ssid(ssid);
+
+    s_portal_authenticated = false;
+    memset(s_portal_password, 0, sizeof(s_portal_password));
+    esp_err_t pass_err = portal_derive_password(s_portal_password);
+    if (pass_err != ESP_OK || s_portal_password[0] == '\0')
+    {
+        ESP_LOGE(TAG, "Portal password derivation failed (%s) — rebooting",
+                 esp_err_to_name(pass_err));
+        esp_restart();
+    }
 
     ESP_LOGI(TAG, "Portal AP  SSID: %s", ssid);
-#if CONFIG_WOL_SERIAL_PROVISION_INFO
-    if (pass[0])
-    {
-        ESP_LOGI(TAG, "Portal AP  PASS: %s  (write this on a label)", pass);
-    }
-#endif
+    ESP_LOGI(TAG, "Portal AP  Auth: WPA2");
 
     /* Create event group before starting HTTP server so the handler
      * can set the bit from within an HTTP callback */
@@ -816,7 +1065,7 @@ void portal_start(void)
         esp_timer_start_once(s_portal_timeout_timer, 300ULL * 1000000ULL);
     }
 
-    start_softap(ssid, pass);
+    start_softap(ssid, s_portal_password);
 
     /* Start DNS redirect so all DNS queries go to the ESP32 */
     esp_ip4_addr_t ap_ip;

@@ -133,7 +133,7 @@ idf.py build flash monitor
 
 **4. Connect to the portal**
 
-On first boot, Heimdall creates a WiFi access point. The SSID and password are printed to the serial monitor. Connect from your phone or laptop — the configuration page opens automatically on iOS, Android, and Windows. Enter your WiFi credentials and MQTT broker details.
+On first boot, Heimdall creates a WPA2-protected WiFi access point. The SSID and permanent portal password are printed to the serial monitor when serial provisioning output is enabled. Connect from your phone or laptop — the configuration page opens automatically on iOS, Android, and Windows. Enter the portal password first, then enter your WiFi credentials and MQTT broker details.
 
 <div align="center">
   <img src="resources/Portal.png" alt="Heimdall Captive Portal Configuration" width="400"/>
@@ -154,6 +154,15 @@ Your machine wakes up.
 Publish a different target MAC to the same command topic to wake a different WoL-capable device on the same LAN. Heimdall does not store a single target PC MAC; the payload selects the target for each command.
 
 > In HARDENED builds with TOTP enabled, the payload must include a valid time-based code. See [TOTP Setup](#-totp-setup-hardened-only).
+
+The repository also includes MQTT helper scripts:
+
+```bash
+./scripts/wake_standard.sh mqtt.example.net 8883 "wol/<device-mac>" AA:BB:CC:DD:EE:FF <mqtt-user> <mqtt-pass>
+./scripts/wake_hardened.sh mqtt.example.net 8883 "<16-character-hmac-topic>" AA:BB:CC:DD:EE:FF "<totp-base32-secret>" <mqtt-user> <mqtt-pass>
+```
+
+Use the STANDARD script with the readable `wol/<device-mac>` topic. Use the HARDENED script with the opaque topic and the Base32 TOTP seed or quoted `otpauth://` URI shown once by the portal. Passing MQTT passwords on the command line can expose them to local process listings, so use these scripts as a starting point for your own automation.
 
 ---
 
@@ -177,8 +186,9 @@ Do not include credentials, paths, or real secrets in the broker field. Scheme p
 
 ```console
 I (645) main: Not provisioned — starting captive portal
+I (646) main: Portal password: <HIDDEN>  (permanent — same after every reset)
 I (660) portal: Portal AP  SSID: NETGEAR-XXXXXX
-I (663) portal: Portal AP  PASS: <HIDDEN>  (write this on a label)
+I (663) portal: Portal AP  Auth: WPA2
 I (1109) portal: SoftAP started  SSID: NETGEAR-XXXXXX  Auth: WPA2  DHCP opt-114: http://192.168.4.1/
 I (1117) dns_server: Listening on UDP port 53 — redirect → 192.168.4.1
 I (1122) dns_server: Started — redirecting all A queries to 192.168.4.1
@@ -248,6 +258,8 @@ Response: <16-character-hmac-response-topic>
 
 HARDENED topics are derived from the device MAC and a secret generated during provisioning. They are printed to the serial monitor during relay startup and should be copied into your trigger script.
 
+For scripted publishes, use `scripts/wake_standard.sh` in STANDARD builds and `scripts/wake_hardened.sh` in HARDENED builds. The hardened script accepts the Base32 TOTP seed or the `otpauth://` URI from the one-time portal secrets page.
+
 ---
 
 ## ✦ Response Payload
@@ -313,6 +325,7 @@ Heimdall/
 │   └── wol/            # Magic packet builder & broadcaster
 ├── main/               # Boot sequence & orchestration
 ├── resources/          # README images and visual design assets
+├── scripts/            # MQTT trigger helpers and Windows WoL setup helper
 ├── partitions.csv      # OTA-ready dual-slot partition table
 └── sdkconfig.defaults  # Baseline Kconfig configuration
 ```

@@ -46,7 +46,7 @@ menu "OPSEC Features"
             before TOTP validation is active.  Until clock sync,
             TOTP payloads are rejected and a warning is logged.
 
-            The companion trigger script (scripts/wake.sh) handles
+            The companion trigger script (scripts/wake_hardened.sh) handles
             TOTP generation automatically.
 
     config OPSEC_TOTP_STEP_SEC

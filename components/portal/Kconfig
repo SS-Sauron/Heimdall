@@ -13,20 +13,7 @@ menu "Captive Portal"
 
             Max 26 characters so the full SSID stays within the 32-char limit.
 
-    config PORTAL_AP_PASSWORD_FROM_MAC
-        bool "Derive portal AP password from MAC hash"
-        default y
-        help
-            Generates a WPA2 password from a hash of the chip MAC address.
-            This makes the AP non-open while keeping the password reproducible
-            (same device always has the same password).
-
-            The password is printed to the serial console on first boot only
-            (controlled by CONFIG_WOL_SERIAL_PROVISION_INFO). Write it on a
-            label stuck to the underside of the device at deployment time.
-
-            If disabled, the AP is open (no password) which makes initial
-            setup easier but means any nearby device can connect to the portal.
+    comment "The portal AP is always WPA2-protected by an eFuse-derived password"
 
     config PORTAL_AP_CHANNEL
         int "SoftAP WiFi channel"

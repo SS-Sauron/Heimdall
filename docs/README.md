@@ -147,9 +147,11 @@ The effective hostname is cached internally and retrieved by other components vi
 
 ### portal
 
-**Files:** `components/portal/portal.c`, `components/portal/portal_html/index.html`
+**Files:** `components/portal/portal.c`, `components/portal/portal.h`, `components/portal/portal_html/index.html`, `components/portal/portal_html/login.html`, `components/portal/portal_html/secrets.html`, `components/portal/portal_html/rebooting.html`
 
-Runs exclusively on the first boot (or after a factory reset). Brings up a SoftAP in `WIFI_MODE_APSTA` mode (both AP and STA active simultaneously — STA is needed for the WiFi scan feature even though it stays unconnected).
+Runs exclusively on the first boot (or after a factory reset). Brings up a WPA2-protected SoftAP in `WIFI_MODE_APSTA` mode (both AP and STA active simultaneously — STA is needed for the WiFi scan feature even though it stays unconnected). The portal password is derived from the factory eFuse MAC with HMAC-SHA256, is not stored in NVS, and remains the same after factory reset.
+
+`index.html` is embedded with `EMBED_FILES`. The smaller login, secrets, and rebooting pages are embedded with `EMBED_TXTFILES`, so their HTTP/template lengths deliberately use `end - start - 1` to exclude the generated null terminator. The secrets page response sets `Cache-Control: no-store` before sending and clears its temporary template buffer after use because it contains the one-time HMAC/TOTP values.
 
 **Captive portal interception uses three complementary mechanisms:**
 
@@ -160,22 +162,24 @@ Runs exclusively on the first boot (or after a factory reset). Brings up a SoftA
 | HTTP 303 + body | `handle_captive_redirect` returns 303 with body content (iOS requirement) |
 
 **Provisioning flow:**
-1. User connects to the SoftAP — captive portal popup appears automatically
-2. Portal scans nearby WiFi networks and presents them as a selectable list
-3. User enters: WiFi SSID/password, MQTT broker URL/port/credentials, optional custom hostname
-4. The browser posts JSON to `POST /api/provision`; the firmware parses it with `cJSON_Parse()`
-5. The portal validates all fields server-side:
+1. User connects to the SoftAP using the permanent portal password printed on serial when `CONFIG_WOL_SERIAL_PROVISION_INFO=y`
+2. Captive portal popup appears automatically and shows a login form
+3. User submits the portal password to `POST /login`; the session unlock flag is RAM-only and resets on reboot
+4. Portal scans nearby WiFi networks and presents them as a selectable list
+5. User enters: WiFi SSID/password, MQTT broker URL/port/credentials, optional custom hostname
+6. The browser posts JSON to `POST /api/provision`; the firmware parses it with `cJSON_Parse()`
+7. The portal validates all fields server-side:
    - WiFi SSID: required, 1–32 bytes
    - MQTT broker host: required, 1–128 bytes, no whitespace/control characters
    - MQTT broker scheme prefixes are stripped before storage (`mqtt://`, `mqtts://`, `tcp://`, `ssl://`, `http://`, `https://`)
    - MQTT port: numeric, defaults to 8883 if omitted
    - MQTT username/password: optional strings, max 64 bytes each; overlength values are rejected instead of truncated
    - Hostname: optional RFC 1123 label, 1–32 chars, letters/digits/hyphen, no leading or trailing hyphen
-6. Credentials are written to NVS via `storage_save_credentials()`
-7. If OPSEC is enabled, HMAC secret and TOTP seed are generated now and shown on a one-time HTML secrets page — **this is the only moment they are visible**
-8. The user records any shown secrets and clicks the final **Start Relay** button, which posts to `/reboot` and triggers `esp_restart()`
+8. Credentials are written to NVS via `storage_save_credentials()`
+9. If OPSEC is enabled, HMAC secret and TOTP seed are generated now and shown on a one-time HTML secrets page — **this is the only moment they are visible**
+10. The user records any shown secrets and clicks the final **Start Relay** button, which posts to `/reboot` and triggers `esp_restart()`
 
-**HTTP server:** 11 URI handlers registered on port 80. `max_uri_handlers` set to 12 for headroom. The wildcard catch-all (`/*`) is registered last and handles all OS captive-portal detection URLs.
+**HTTP server:** 12 URI handlers registered on port 80. `max_uri_handlers` set to 12. The wildcard catch-all (`/*`) is registered last and handles all OS captive-portal detection URLs.
 
 ---
 
@@ -244,6 +248,8 @@ SNTP is required for TOTP. `opsec_sync_clock()` blocks for up to 30 seconds wait
 AA:BB:CC:DD:EE:FF:123456
 └─── target MAC ───┘└code┘
 ```
+
+The companion `scripts/wake_hardened.sh` helper generates the TOTP suffix automatically. It accepts the Base32 seed or quoted `otpauth://` URI shown on the one-time portal secrets page. `scripts/wake_standard.sh` sends the plain MAC payload used by STANDARD builds.
 
 ---
 
@@ -352,7 +358,6 @@ Key Kconfig symbols. All configurable via `idf.py menuconfig`.
 | `CONFIG_PORTAL_HTTP_PORT` | 80 | Captive portal HTTP server port |
 | `CONFIG_PORTAL_AP_CHANNEL` | 6 | SoftAP WiFi channel |
 | `CONFIG_PORTAL_AP_MAX_CONN` | 1 | Maximum simultaneous provisioning clients |
-| `CONFIG_PORTAL_AP_PASSWORD_FROM_MAC` | y | Derive a reproducible WPA2 portal password from the chip MAC hash |
 | `CONFIG_PORTAL_TIMEOUT_SEC` | 180 | Portal timeout in seconds (0 = wait forever) |
 | `CONFIG_STORAGE_NVS_NAMESPACE` | wol | NVS namespace used for all persisted configuration |
 

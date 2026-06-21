@@ -196,6 +196,17 @@ void app_main(void)
      * ------------------------------------------------------------------ */
     if (!storage_is_provisioned()) {
         ESP_LOGI(TAG, "Not provisioned — starting captive portal");
+#if CONFIG_WOL_SERIAL_PROVISION_INFO
+        char portal_password[9] = {0};
+        esp_err_t portal_pass_err = portal_derive_password(portal_password);
+        if (portal_pass_err != ESP_OK || portal_password[0] == '\0') {
+            ESP_LOGE(TAG, "Portal password derivation failed (%s) — rebooting",
+                     esp_err_to_name(portal_pass_err));
+            esp_restart();
+        }
+        ESP_LOGI(TAG, "Portal password: %s  (permanent — same after every reset)",
+                 portal_password);
+#endif
         portal_start();   /* blocks until credentials saved, then reboots */
         /* unreachable */
     }
