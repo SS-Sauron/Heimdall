@@ -134,7 +134,7 @@ idf.py build flash monitor
 
 **4. Connect to the portal**
 
-On first boot, Heimdall creates a WPA2-protected WiFi access point. The SSID and permanent portal password are printed to the serial monitor when serial provisioning output is enabled. Connect from your phone or laptop — the configuration page opens automatically on iOS, Android, and Windows. Enter the portal password first, then enter your WiFi credentials and MQTT broker details.
+On first boot, Heimdall creates a WPA2-protected WiFi access point. The SSID and permanent portal password are printed to the serial monitor when serial provisioning output is enabled. Connect from your phone or laptop — the configuration page opens automatically on iOS, Android, and Windows.
 
 <div align="center">
   <img src="resources/Portal.png" alt="Heimdall Captive Portal Configuration" width="400"/>
@@ -316,7 +316,7 @@ Heimdall supports dual-slot OTA updates with automatic rollback. You don't need 
 If `CONFIG_OTA_ALLOW_HTTP=y` is enabled in your `sdkconfig.defaults`, you can flash a new build over your local network using the provided script:
 
 ```bash
-./scripts/ota_push.sh <esp32-ip-address> build/wol_relay.bin
+./scripts/ota_push.sh --host <esp32-ip-address> [--bin build/wol_relay.bin]
 ```
 
 > [!WARNING]
