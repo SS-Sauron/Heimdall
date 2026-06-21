@@ -5,3 +5,8 @@ CONFIG_OPSEC_HMAC_TOPIC=y
 CONFIG_OPSEC_TOTP=y
 CONFIG_OPSEC_TOTP_DIGITS=6
 CONFIG_OPSEC_TOTP_STEP_SEC=30
+
+# Use standard libc allocator for mbedTLS on the linux host target.
+# This avoids the esp_mbedtls_mem_calloc/esp_mbedtls_mem_free symbols that
+# are only provided by the ESP-IDF mbedtls port (unavailable on linux target).
+CONFIG_MBEDTLS_DEFAULT_MEM_ALLOC=y
