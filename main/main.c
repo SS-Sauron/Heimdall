@@ -6,7 +6,7 @@
  *
  * Boot sequence:
  *   1. NVS flash init
- *   2. Core networking primitives (netif + event loop)
+ *   2. Core networking primitives + one-time WiFi driver init
  *   3. Factory-reset button check (blocking — GPIO 0, active-low)
  *   4. Identity obfuscation (MAC spoof, hostname) — before WiFi starts
  *   5. Provisioning check → portal (first boot) or station (normal boot)
@@ -22,6 +22,7 @@
 #include "nvs_flash.h"
 #include "esp_event.h"
 #include "esp_netif.h"
+#include "esp_wifi.h"
 #include "driver/gpio.h"
 #include "esp_system.h"
 #include "esp_attr.h"
@@ -144,7 +145,7 @@ void app_main(void)
     ESP_LOGI(TAG, "NVS ready");
 
     /* ------------------------------------------------------------------
-     * Step 2: Core networking primitives
+     * Step 2: Core networking primitives + one-time WiFi driver init
      * Must be done before any WiFi or TCP/IP operation.
      * ------------------------------------------------------------------ */
     ESP_ERROR_CHECK(esp_netif_init());
@@ -152,6 +153,19 @@ void app_main(void)
     ESP_ERROR_CHECK(mdns_init());
     netbiosns_init();
     ESP_LOGI(TAG, "netif + event loop ready");
+
+    /* Create the default STA netif before identity_apply() so hostname
+     * assignment can happen before DHCP, then initialize the WiFi driver once.
+     * Station/portal code owns mode/config/start after identity is applied. */
+    esp_netif_t *sta_netif = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
+    if (sta_netif == NULL) {
+        sta_netif = esp_netif_create_default_wifi_sta();
+    }
+    configASSERT(sta_netif != NULL);
+
+    wifi_init_config_t wifi_cfg = WIFI_INIT_CONFIG_DEFAULT();
+    ESP_ERROR_CHECK(esp_wifi_init(&wifi_cfg));
+    ESP_LOGI(TAG, "WiFi base initialized");
 
     /* ------------------------------------------------------------------
      * Step 3: Factory-reset button monitor

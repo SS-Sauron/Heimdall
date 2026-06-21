@@ -1,7 +1,7 @@
 /*
  * identity.c
  *
- * Applies network identity obfuscation before WiFi starts.
+ * Applies network identity obfuscation after WiFi init and before WiFi starts.
  *
  * MAC spoofing uses esp_derive_local_mac() which sets the locally-
  * administered bit (bit 1 of octet 0) so the result is a valid LAA
@@ -87,13 +87,12 @@ static void apply_fake_hostname(const uint8_t mac[6])
              CONFIG_OPSEC_IDENTITY_HOSTNAME_PREFIX,
              mac[3], mac[4], mac[5]);
 
-    /* Apply via the default STA netif. The netif must have been created
-     * (esp_netif_create_default_wifi_sta) before this point. */
+    /* Apply via the default STA netif. main.c creates this before calling
+     * identity_apply(), and station startup reapplies it defensively. */
     esp_netif_t *sta_netif = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
     if (sta_netif == NULL)
     {
         ESP_LOGW(TAG, "STA netif not found — hostname not applied yet");
-        /* Will be set again when wifi_sta_connect() creates the netif */
         return;
     }
 
@@ -163,26 +162,9 @@ void identity_apply(void)
 apply_network_identity:
 #if CONFIG_OPSEC_IDENTITY_SPOOF_MAC
     /*
-     * MAC spoofing requires the WiFi driver to be initialised first.
-     * We initialise it here with a minimal config, apply the MAC, then
-     * leave the driver in INIT state for wifi_sta_connect() to start it.
-     *
-     * Note: If your build calls esp_wifi_init() elsewhere before this
-     * point, move apply_mac_spoof() there instead and remove the init
-     * call below.
+     * MAC spoofing requires the WiFi driver to be initialised and stopped.
+     * main.c owns esp_wifi_init(); runtime paths own final mode/config/start.
      */
-    {
-    wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
-    esp_err_t init_err = esp_wifi_init(&cfg);
-    /* ESP-IDF v5 returns ESP_ERR_WIFI_INIT_STATE on double-init;
-     * v6 returns the generic ESP_ERR_INVALID_STATE — both are safe to ignore. */
-    if (init_err != ESP_OK &&
-        init_err != ESP_ERR_WIFI_INIT_STATE &&
-        init_err != ESP_ERR_INVALID_STATE)
-    {
-        ESP_ERROR_CHECK(init_err);
-    }
-
     /* Espressif requirement: esp_wifi_set_mode() MUST be called before
      * esp_wifi_set_mac() so the driver knows which interface owns the MAC.
      * Without this, esp_wifi_set_mac(WIFI_IF_STA, ...) returns
@@ -193,7 +175,6 @@ apply_network_identity:
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
 
     apply_mac_spoof(base_mac);
-    }
 #endif
 
 #if CONFIG_OPSEC_IDENTITY_FAKE_HOSTNAME

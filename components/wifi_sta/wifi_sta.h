@@ -20,9 +20,9 @@ extern "C" {
 /**
  * @brief Connect to the WiFi network stored in NVS and block until done.
  *
- * Initialises the WiFi driver (if not already done by identity.c),
- * creates the default STA netif, registers event handlers, and starts
- * the connection process.
+ * Uses the WiFi driver and default STA netif initialised by main,
+ * registers event handlers, applies station credentials, and starts the
+ * connection process.
  *
  * Blocks indefinitely — it does NOT return on failure. On failure, the
  * function calls esp_restart() internally via one of two paths and never

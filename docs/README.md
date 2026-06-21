@@ -106,7 +106,7 @@ Every boot follows this exact sequence. Ordering is strict — deviating from it
 
 **Files:** `main/main.c`, `main/Kconfig.projbuild`
 
-The boot dispatcher. Calls each component in the correct order, handles the provisioned/unprovisioned branch, and contains the crash-loop detection logic. After handing off to `mqtt_relay_start()` it never regains control — the MQTT relay runs until a reset.
+The boot dispatcher. Calls each component in the correct order, handles the provisioned/unprovisioned branch, and contains the crash-loop detection logic. It creates the default STA netif and initializes the WiFi driver exactly once before identity handling; station and portal paths only configure mode, credentials, and start WiFi afterward. After handing off to `mqtt_relay_start()` it never regains control — the MQTT relay runs until a reset.
 
 **Crash loop detection:** On every boot, `esp_reset_reason()` is checked. If the reason is `ESP_RST_PANIC` or `ESP_RST_TASK_WDT` (genuine firmware crashes — not intentional software resets), a counter in NVS is incremented. Once that counter reaches the configured threshold (default: 5 consecutive crashes), `storage_erase_all()` is called and the device reboots into provisioning mode. Any successful WiFi connection resets the counter to zero.
 
@@ -130,7 +130,7 @@ See [NVS Storage Schema](#nvs-storage-schema) for the complete key list.
 
 **Files:** `components/identity/identity.c`, `components/identity/identity.h`
 
-Handles network identity before WiFi starts. Must run after `esp_wifi_init()` (called internally if not already called) but before `esp_wifi_start()`.
+Handles network identity before WiFi starts. Must run after `main` has created `WIFI_STA_DEF` and called `esp_wifi_init()`, but before `esp_wifi_start()`. Identity deliberately does not initialize WiFi itself, which prevents duplicate `esp_wifi_init()` calls when booting into relay or captive portal mode.
 
 **MAC spoofing (HARDENED only):** Derives a locally-administered MAC address from the factory eFuse MAC using `esp_derive_local_mac()`. The result sets the locally-administered bit (bit 1 of byte 0), making it a valid LAA address that does not resolve to Espressif in OUI databases. Applied via `esp_wifi_set_mac()`.
 

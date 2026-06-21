@@ -150,9 +150,8 @@ esp_err_t wifi_sta_connect(void)
     s_wifi_events = xEventGroupCreate();
     configASSERT(s_wifi_events);
 
-    /* ADDITIONAL PROBLEM 3 FIX: check ifkey before creating a new netif.
-     * The portal runs in APSTA mode and may have already created the STA
-     * netif. Creating it again produces a duplicate. */
+    /* main.c creates the default STA netif before identity_apply(). Keep this
+     * fallback so the component remains robust if called from a test harness. */
     if (s_sta_netif == NULL)
     {
         s_sta_netif = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
@@ -168,14 +167,6 @@ esp_err_t wifi_sta_connect(void)
     esp_netif_set_hostname(s_sta_netif, hostname);
     mdns_hostname_set(hostname);
     netbiosns_set_name(hostname);
-
-    /* Initialise WiFi driver if identity.c hasn't already done so */
-    wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
-    err = esp_wifi_init(&cfg);
-    if (err != ESP_OK && err != ESP_ERR_INVALID_STATE)
-    {
-        return err;
-    }
 
     /* Register event handlers */
     ESP_ERROR_CHECK(esp_event_handler_register(

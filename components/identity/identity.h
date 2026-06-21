@@ -4,12 +4,13 @@
  * Network identity obfuscation.
  *
  * Applies a locally-administered MAC address and an obfuscated DHCP
- * hostname to the WiFi station interface before the WiFi driver starts.
+ * hostname to the WiFi station interface after WiFi driver init and
+ * before the driver starts.
  * Both operations are no-ops when the corresponding Kconfig options are
  * disabled (STANDARD build profile).
  *
- * Call identity_apply() once, after esp_netif_init() and before
- * esp_wifi_init() / esp_wifi_start().
+ * Call identity_apply() once, after main has created WIFI_STA_DEF and
+ * called esp_wifi_init(), but before esp_wifi_start().
  */
 
 #pragma once
@@ -31,7 +32,7 @@ extern "C" {
  *      programs it into the WiFi station interface.
  *   2. Sets the DHCP hostname to an obfuscated consumer-device string.
  *
- * Must be called AFTER esp_netif_init() but BEFORE esp_wifi_start().
+ * Must be called AFTER one-time WiFi base init but BEFORE esp_wifi_start().
  */
 void identity_apply(void);
 

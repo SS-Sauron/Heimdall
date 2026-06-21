@@ -127,19 +127,19 @@ static esp_netif_t *s_ap_netif = NULL;
 
 static void start_softap(const char *ssid, const char *password)
 {
-    s_ap_netif = esp_netif_create_default_wifi_ap();
-    esp_netif_create_default_wifi_sta();
-
-    wifi_init_config_t wifi_cfg = WIFI_INIT_CONFIG_DEFAULT();
-    /* esp_wifi_init may already have been called by identity.c (MAC spoof).
-     * ESP-IDF v5 returns ESP_ERR_WIFI_INIT_STATE; v6 returns the generic
-     * ESP_ERR_INVALID_STATE — treat both as "already initialised, skip". */
-    esp_err_t init_err = esp_wifi_init(&wifi_cfg);
-    if (init_err != ESP_OK &&
-        init_err != ESP_ERR_WIFI_INIT_STATE &&
-        init_err != ESP_ERR_INVALID_STATE)
+    if (s_ap_netif == NULL)
     {
-        ESP_ERROR_CHECK(init_err);
+        s_ap_netif = esp_netif_get_handle_from_ifkey("WIFI_AP_DEF");
+        if (s_ap_netif == NULL)
+        {
+            s_ap_netif = esp_netif_create_default_wifi_ap();
+        }
+    }
+    configASSERT(s_ap_netif != NULL);
+
+    if (esp_netif_get_handle_from_ifkey("WIFI_STA_DEF") == NULL)
+    {
+        esp_netif_create_default_wifi_sta();
     }
 
     wifi_config_t ap_config = {
