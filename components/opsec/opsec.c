@@ -3,7 +3,7 @@
  *
  * OPSEC cryptographic layer implementation.
  *
- * Uses mbedTLS (bundled with ESP-IDF) for:
+ * Uses PSA Crypto (bundled through ESP-IDF mbedTLS) for:
  *   - HMAC-SHA256  (topic derivation)
  *   - HMAC-SHA1    (TOTP per RFC 6238)
  *
@@ -12,6 +12,7 @@
 
 #include <string.h>
 #include <stdio.h>
+#include <stdint.h>
 #include <time.h>
 #include "esp_log.h"
 #ifndef CONFIG_IDF_TARGET_LINUX
@@ -21,7 +22,7 @@
 #include "esp_sntp.h"
 #include "identity.h"
 #endif /* CONFIG_IDF_TARGET_LINUX */
-#include "mbedtls/md.h"
+#include "psa/crypto.h"
 #include "storage.h"
 #include "opsec.h"
 #include "sdkconfig.h"
@@ -49,19 +50,87 @@ static void sntp_sync_cb(struct timeval *tv)
 }
 #endif
 
+#if CONFIG_OPSEC_HMAC_TOPIC || CONFIG_OPSEC_TOTP || CONFIG_OPSEC_TEST
+static esp_err_t hmac_compute(psa_algorithm_t alg,
+                              const uint8_t *key, size_t key_len,
+                              const uint8_t *data, size_t data_len,
+                              uint8_t *digest, size_t digest_len)
+{
+    if (!key || !data || !digest || key_len == 0 || digest_len == 0 || key_len > (SIZE_MAX / 8))
+        return ESP_ERR_INVALID_ARG;
+
+    psa_status_t status = psa_crypto_init();
+    if (status != PSA_SUCCESS)
+    {
+        ESP_LOGE(TAG, "PSA crypto init failed: %d", (int)status);
+        return ESP_FAIL;
+    }
+
+    psa_key_attributes_t attributes = PSA_KEY_ATTRIBUTES_INIT;
+    psa_key_id_t key_id = 0;
+
+    psa_set_key_usage_flags(&attributes, PSA_KEY_USAGE_SIGN_MESSAGE);
+    psa_set_key_algorithm(&attributes, alg);
+    psa_set_key_type(&attributes, PSA_KEY_TYPE_HMAC);
+    psa_set_key_bits(&attributes, key_len * 8);
+    psa_set_key_lifetime(&attributes, PSA_KEY_LIFETIME_VOLATILE);
+
+    status = psa_import_key(&attributes, key, key_len, &key_id);
+    psa_reset_key_attributes(&attributes);
+    if (status != PSA_SUCCESS)
+    {
+        ESP_LOGE(TAG, "PSA HMAC key import failed: %d", (int)status);
+        return ESP_FAIL;
+    }
+
+    size_t mac_len = 0;
+    status = psa_mac_compute(key_id, alg, data, data_len,
+                             digest, digest_len, &mac_len);
+
+    psa_status_t destroy_status = psa_destroy_key(key_id);
+    if (status != PSA_SUCCESS)
+    {
+        ESP_LOGE(TAG, "PSA HMAC compute failed: %d", (int)status);
+        return ESP_FAIL;
+    }
+    if (destroy_status != PSA_SUCCESS)
+    {
+        ESP_LOGE(TAG, "PSA HMAC key destroy failed: %d", (int)destroy_status);
+        return ESP_FAIL;
+    }
+    if (mac_len != digest_len)
+    {
+        ESP_LOGE(TAG, "PSA HMAC length mismatch: got %u expected %u",
+                 (unsigned)mac_len, (unsigned)digest_len);
+        return ESP_FAIL;
+    }
+
+    return ESP_OK;
+}
+
 /* --------------------------------------------------------------------------
- * Internal: compute HMAC-SHA256(key, data) → digest[32]
+ * Internal: compute HMAC-SHA256(key, data) -> digest[32]
  * -------------------------------------------------------------------------- */
-#if CONFIG_OPSEC_HMAC_TOPIC || CONFIG_OPSEC_TOTP
+#if CONFIG_OPSEC_HMAC_TOPIC
 static esp_err_t hmac_sha256(const uint8_t *key, size_t key_len,
                              const uint8_t *data, size_t data_len,
                              uint8_t digest[32])
 {
-    int ret = mbedtls_md_hmac(mbedtls_md_info_from_type(MBEDTLS_MD_SHA256),
-                              key, key_len, data, data_len, digest);
-    return (ret == 0) ? ESP_OK : ESP_FAIL;
+    return hmac_compute(PSA_ALG_HMAC(PSA_ALG_SHA_256),
+                        key, key_len, data, data_len, digest, 32);
 }
-#endif /* CONFIG_OPSEC_HMAC_TOPIC || CONFIG_OPSEC_TOTP */
+#endif
+
+#if CONFIG_OPSEC_TOTP || CONFIG_OPSEC_TEST
+static esp_err_t hmac_sha1(const uint8_t *key, size_t key_len,
+                           const uint8_t *data, size_t data_len,
+                           uint8_t digest[20])
+{
+    return hmac_compute(PSA_ALG_HMAC(PSA_ALG_SHA_1),
+                        key, key_len, data, data_len, digest, 20);
+}
+#endif
+#endif /* CONFIG_OPSEC_HMAC_TOPIC || CONFIG_OPSEC_TOTP || CONFIG_OPSEC_TEST */
 
 /* --------------------------------------------------------------------------
  * Internal: RFC 6238 TOTP for a specific time counter T
@@ -77,8 +146,11 @@ static esp_err_t hmac_sha256(const uint8_t *key, size_t key_len,
  *   result = code % 10^DIGITS
  * -------------------------------------------------------------------------- */
 #if CONFIG_OPSEC_TOTP
-static uint32_t totp_at_counter(uint64_t T)
+static esp_err_t totp_at_counter(uint64_t T, uint32_t *code_out)
 {
+    if (!code_out)
+        return ESP_ERR_INVALID_ARG;
+
     /* Encode T as 8-byte big-endian */
     uint8_t msg[8];
     for (int i = 7; i >= 0; i--)
@@ -89,9 +161,10 @@ static uint32_t totp_at_counter(uint64_t T)
 
     /* HMAC-SHA1 */
     uint8_t digest[20];
-    mbedtls_md_hmac(mbedtls_md_info_from_type(MBEDTLS_MD_SHA1),
-                    s_totp_seed, STORAGE_TOTP_SEED_LEN,
-                    msg, sizeof(msg), digest);
+    esp_err_t err = hmac_sha1(s_totp_seed, STORAGE_TOTP_SEED_LEN,
+                              msg, sizeof(msg), digest);
+    if (err != ESP_OK)
+        return err;
 
     /* Dynamic truncation */
     int offset = digest[19] & 0x0F;
@@ -102,21 +175,32 @@ static uint32_t totp_at_counter(uint64_t T)
     for (int i = 0; i < CONFIG_OPSEC_TOTP_DIGITS; i++)
         modulus *= 10;
 
-    return code % modulus;
+    *code_out = code % modulus;
+    return ESP_OK;
 }
 
 /* Accept if the code matches T-1, T, or T+1 (±1 window = ±30 s drift) */
-static bool totp_validate(uint32_t submitted_code)
+static esp_err_t totp_validate(uint32_t submitted_code, bool *valid_out)
 {
+    if (!valid_out)
+        return ESP_ERR_INVALID_ARG;
+
+    *valid_out = false;
     uint64_t T = (uint64_t)time(NULL) / CONFIG_OPSEC_TOTP_STEP_SEC;
     for (int delta = -1; delta <= 1; delta++)
     {
-        if (totp_at_counter((uint64_t)((int64_t)T + delta)) == submitted_code)
+        uint32_t expected_code = 0;
+        esp_err_t err = totp_at_counter((uint64_t)((int64_t)T + delta), &expected_code);
+        if (err != ESP_OK)
+            return err;
+
+        if (expected_code == submitted_code)
         {
-            return true;
+            *valid_out = true;
+            return ESP_OK;
         }
     }
-    return false;
+    return ESP_OK;
 }
 #endif
 #if CONFIG_OPSEC_TEST
@@ -134,9 +218,9 @@ uint32_t totp_at_counter_for_test(const uint8_t *seed, size_t seed_len,
 
     /* HMAC-SHA1 */
     uint8_t digest[20];
-    mbedtls_md_hmac(mbedtls_md_info_from_type(MBEDTLS_MD_SHA1),
-                    seed, seed_len,
-                    msg, sizeof(msg), digest);
+    esp_err_t err = hmac_sha1(seed, seed_len, msg, sizeof(msg), digest);
+    if (err != ESP_OK)
+        return 0;
 
     /* Dynamic truncation */
     int offset = digest[19] & 0x0F;
@@ -296,7 +380,15 @@ esp_err_t opsec_parse_payload(const char *payload, size_t payload_len,
 
     uint32_t submitted = (uint32_t)strtoul(buf + 18, NULL, 10);
 
-    if (!totp_validate(submitted))
+    bool valid = false;
+    esp_err_t err = totp_validate(submitted, &valid);
+    if (err != ESP_OK)
+    {
+        ESP_LOGE(TAG, "TOTP validation failed due to crypto error: %s", esp_err_to_name(err));
+        return err;
+    }
+
+    if (!valid)
     {
         ESP_LOGW(TAG, "TOTP validation failed for code %0*u",
                  CONFIG_OPSEC_TOTP_DIGITS, submitted);

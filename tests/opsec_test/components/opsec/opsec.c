@@ -9,15 +9,15 @@
  *   identity → esp_wifi          ← NOT available on the linux target
  *   lwip (esp_sntp)              ← NOT available on the linux target
  *
- * This shadow component requires only mbedtls + esp_log, which ARE
+ * This shadow component requires only mbedtls + log, which ARE
  * available on the linux target.  All public API functions other than
  * totp_at_counter_for_test() are stubbed out; they are never called by
  * the unit-test executable.
  *
  * ALGORITHM FIDELITY
  * ------------------
- * totp_at_counter_for_test() is a verbatim copy of the implementation
- * in components/opsec/opsec.c — not a reimplementation.  If the
+ * totp_at_counter_for_test() mirrors the production implementation
+ * in components/opsec/opsec.c. If the
  * production algorithm changes, this copy must be updated in sync.
  */
 
@@ -27,8 +27,7 @@
 #include <stdbool.h>
 #include "esp_err.h"
 #include "esp_log.h"
-#define MBEDTLS_DECLARE_PRIVATE_IDENTIFIERS
-#include "mbedtls/md.h"
+#include "psa/crypto.h"
 #include "opsec.h"
 
 static const char *TAG = "opsec_test_stub";
@@ -71,10 +70,67 @@ bool opsec_clock_is_synced(void)
     return true;
 }
 
+#if CONFIG_OPSEC_TEST
+static esp_err_t hmac_sha1(const uint8_t *key, size_t key_len,
+                           const uint8_t *data, size_t data_len,
+                           uint8_t digest[20])
+{
+    if (!key || !data || !digest || key_len == 0 || key_len > (SIZE_MAX / 8))
+        return ESP_ERR_INVALID_ARG;
+
+    psa_status_t status = psa_crypto_init();
+    if (status != PSA_SUCCESS)
+    {
+        ESP_LOGE(TAG, "PSA crypto init failed: %d", (int)status);
+        return ESP_FAIL;
+    }
+
+    psa_key_attributes_t attributes = PSA_KEY_ATTRIBUTES_INIT;
+    psa_key_id_t key_id = 0;
+
+    psa_set_key_usage_flags(&attributes, PSA_KEY_USAGE_SIGN_MESSAGE);
+    psa_set_key_algorithm(&attributes, PSA_ALG_HMAC(PSA_ALG_SHA_1));
+    psa_set_key_type(&attributes, PSA_KEY_TYPE_HMAC);
+    psa_set_key_bits(&attributes, key_len * 8);
+    psa_set_key_lifetime(&attributes, PSA_KEY_LIFETIME_VOLATILE);
+
+    status = psa_import_key(&attributes, key, key_len, &key_id);
+    psa_reset_key_attributes(&attributes);
+    if (status != PSA_SUCCESS)
+    {
+        ESP_LOGE(TAG, "PSA HMAC key import failed: %d", (int)status);
+        return ESP_FAIL;
+    }
+
+    size_t mac_len = 0;
+    status = psa_mac_compute(key_id, PSA_ALG_HMAC(PSA_ALG_SHA_1),
+                             data, data_len, digest, 20, &mac_len);
+
+    psa_status_t destroy_status = psa_destroy_key(key_id);
+    if (status != PSA_SUCCESS)
+    {
+        ESP_LOGE(TAG, "PSA HMAC compute failed: %d", (int)status);
+        return ESP_FAIL;
+    }
+    if (destroy_status != PSA_SUCCESS)
+    {
+        ESP_LOGE(TAG, "PSA HMAC key destroy failed: %d", (int)destroy_status);
+        return ESP_FAIL;
+    }
+    if (mac_len != 20)
+    {
+        ESP_LOGE(TAG, "PSA HMAC length mismatch: got %u expected 20", (unsigned)mac_len);
+        return ESP_FAIL;
+    }
+
+    return ESP_OK;
+}
+#endif /* CONFIG_OPSEC_TEST */
+
 /* --------------------------------------------------------------------------
  * totp_at_counter_for_test()
  *
- * Verbatim copy of the algorithm from components/opsec/opsec.c.
+ * Copy of the algorithm from components/opsec/opsec.c.
  * See that file for the full algorithm commentary.
  *
  * Algorithm (RFC 6238 / RFC 4226):
@@ -102,9 +158,9 @@ uint32_t totp_at_counter_for_test(const uint8_t *seed, size_t seed_len,
 
     /* HMAC-SHA1 */
     uint8_t digest[20];
-    mbedtls_md_hmac(mbedtls_md_info_from_type(MBEDTLS_MD_SHA1),
-                    seed, seed_len,
-                    msg, sizeof(msg), digest);
+    esp_err_t err = hmac_sha1(seed, seed_len, msg, sizeof(msg), digest);
+    if (err != ESP_OK)
+        return 0;
 
     /* Dynamic truncation */
     int offset = digest[19] & 0x0F;

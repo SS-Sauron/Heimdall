@@ -38,6 +38,6 @@ direct_dependencies:
 - espressif/mdns
 - espressif/mqtt
 - idf
-manifest_hash: 20eab8bf2fa81c54b93480cdf1c1e435ca59058c1dd6f3c850d05110bd4ea2a7
+manifest_hash: 0e282bb6b727bcbf15810ae3de418bbe26585ab8199cff913fa0d2729dd25a61
 target: esp32
 version: 3.0.0

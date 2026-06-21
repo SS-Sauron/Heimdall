@@ -9,7 +9,7 @@ if(IDF_TARGET STREQUAL "linux")
             "."
         REQUIRES
             mbedtls
-            esp_log
+            log
             storage
     )
 else()

@@ -1,0 +1,25 @@
+menu "OPSEC Test Options"
+
+    config OPSEC_TEST
+        bool "Expose internal functions for unit testing"
+        default y
+
+    config OPSEC_HMAC_TOPIC
+        bool "Enable HMAC topic test config"
+        default y
+
+    config OPSEC_TOTP
+        bool "Enable TOTP test config"
+        default y
+
+    config OPSEC_TOTP_STEP_SEC
+        int "TOTP time step in seconds"
+        default 30
+        range 15 60
+
+    config OPSEC_TOTP_DIGITS
+        int "TOTP code length"
+        default 6
+        range 6 8
+
+endmenu
