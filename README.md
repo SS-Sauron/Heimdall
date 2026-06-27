@@ -239,7 +239,9 @@ Once Heimdall is successfully provisioned and connected to your MQTT broker, you
 > - **Topic MAC:** The MAC address of the *Heimdall ESP32 device*. This defines *where* the command is sent.
 > - **Payload MAC:** The MAC address of the *Sleeping PC* you want to wake. This defines *what* is woken up.
 
-### Finding Your Command Topic
+---
+
+### ✦ Finding Your Command Topic
 
 The topics Heimdall subscribes and publishes to depend on the selected build profile. Responses are split into a **Status** topic (`/s`) for retained machine-readable state, and a **Log** topic (`/l`) for unretained human-readable diagnostics.
 
@@ -263,7 +265,9 @@ Log:      <16-character-hmac-topic-base>/l
 
 HARDENED topics are opaque strings derived from the device MAC and a secret generated during provisioning. They are printed to the serial monitor during relay startup.
 
-### Using the Trigger Scripts
+---
+
+### ✦ Using the Trigger Scripts
 
 The repository includes ready-to-use Bash scripts that format the MQTT payload and handle the `mosquitto_pub` command for you.
 
@@ -281,7 +285,9 @@ The repository includes ready-to-use Bash scripts that format the MQTT payload a
 ```
 *Example:* `./scripts/wake_hardened.sh mqtt.example.com 8883 "a1b2c3d4e5f6g7h8" 99:88:77:66:55:44 "JBSWY3DPEHPK3PXP"`
 
-### Ping Feedback (Optional)
+---
+
+### ✦ Ping Feedback (Optional)
 
 If your firmware is compiled with `CONFIG_WOL_PING_FEEDBACK=y`, you can include the target PC's IP address in your command. Heimdall will ping the machine and publish an alert when it successfully boots up, or if it times out.
 
@@ -297,7 +303,9 @@ Append the IP address as a 4th segment after the MAC and TOTP:
 AA:BB:CC:DD:EE:FF:123456:192.168.1.100
 ```
 
-### Response Payload
+---
+
+### ✦ Response Payload
 
 After dispatching a magic packet, Heimdall publishes a confirmation to the **Status** topic (`/s`):
 
@@ -335,7 +343,9 @@ If Ping Feedback was requested, you will receive a *second* message on the **Sta
 | `free_heap` | (Log topic only) The available RAM on the ESP32 in bytes. Useful for monitoring device health. |
 | `uptime_s` | (Log topic only) Total time the ESP32 has been continuously running in seconds since the last reboot. |
 
-### GPIO Output Control
+---
+
+### ✦ GPIO Output Control
 
 If your firmware is compiled with `CONFIG_WOL_GPIO_COMMANDS=y`, you can control specific GPIO pins on the ESP32 by publishing a JSON payload to the main command topic. 
 
@@ -356,7 +366,9 @@ Heimdall will publish a confirmation back to the **Status** topic (`/s`):
 {"action":"gpio", "pin":4, "level":1, "status":"ok"}
 ```
 
-### TOTP Setup (HARDENED only)
+---
+
+### ✦ TOTP Setup (HARDENED only)
 
 When TOTP is enabled, every wake command must append a valid 6-digit time-based code to the target MAC address:
 
