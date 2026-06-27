@@ -56,6 +56,7 @@ You send a command. Heimdall wakes your machine. That's it.
 | 🛡️ | **Self-Healing WiFi** — Distinguishes wrong credentials from transient outages. Never bounces into setup mode during a router restart |
 | 🏷️ | **Custom Hostname** — Set your own device name, synced to DHCP, mDNS, and NetBIOS |
 | 🏓 | **Ping Feedback** — Optionally confirm PC awake status via ICMP echo requests |
+| 🔌 | **GPIO Output Control** — Remotely toggle specific ESP32 pins (e.g. for physical relays). Secured by TOTP in HARDENED builds |
 
 ---
 
@@ -240,13 +241,14 @@ Once Heimdall is successfully provisioned and connected to your MQTT broker, you
 
 ### Finding Your Command Topic
 
-The topic Heimdall subscribes to depends on the selected build profile.
+The topics Heimdall subscribes and publishes to depend on the selected build profile. Responses are split into a **Status** topic (`/s`) for retained machine-readable state, and a **Log** topic (`/l`) for unretained human-readable diagnostics.
 
 **STANDARD build**
 
 ```text
 Command:  wol/<device-mac>
-Response: wol/<device-mac>/r
+Status:   wol/<device-mac>/s
+Log:      wol/<device-mac>/l
 ```
 
 `<device-mac>` is the ESP32 station MAC printed in the serial monitor.
@@ -255,7 +257,8 @@ Response: wol/<device-mac>/r
 
 ```text
 Command:  <16-character-hmac-topic>
-Response: <16-character-hmac-response-topic>
+Status:   <16-character-hmac-topic-base>/s
+Log:      <16-character-hmac-topic-base>/l
 ```
 
 HARDENED topics are opaque strings derived from the device MAC and a secret generated during provisioning. They are printed to the serial monitor during relay startup.
@@ -296,18 +299,25 @@ AA:BB:CC:DD:EE:FF:123456:192.168.1.100
 
 ### Response Payload
 
-After dispatching a magic packet, Heimdall publishes a confirmation to the response topic:
+After dispatching a magic packet, Heimdall publishes a confirmation to the **Status** topic (`/s`):
 
 ```json
 {
   "mac": "AA:BB:CC:DD:EE:FF",
-  "status": "sent",
+  "status": "sent"
+}
+```
+
+System diagnostics (like uptime and free heap) are published periodically and upon wake commands to the **Log** topic (`/l`):
+
+```json
+{
   "free_heap": 187432,
   "uptime_s": 3672
 }
 ```
 
-If Ping Feedback was requested, you will receive a *second* message on this same topic once the machine boots (or times out):
+If Ping Feedback was requested, you will receive a *second* message on the **Status** topic once the machine boots (or times out):
 
 ```json
 {
@@ -322,8 +332,29 @@ If Ping Feedback was requested, you will receive a *second* message on this same
 | `mac` | The target MAC address that the Wake-on-LAN magic packet was dispatched to. |
 | `status` | `sent` (WoL broadcasted), `awake` (PC responded to ping), or `timeout` (ping failed). |
 | `boot_time_s` | Time elapsed in seconds between the WoL broadcast and the first successful ping reply. |
-| `free_heap` | The available RAM on the ESP32 in bytes. Useful for monitoring device health. |
-| `uptime_s` | Total time the ESP32 has been continuously running in seconds since the last reboot. |
+| `free_heap` | (Log topic only) The available RAM on the ESP32 in bytes. Useful for monitoring device health. |
+| `uptime_s` | (Log topic only) Total time the ESP32 has been continuously running in seconds since the last reboot. |
+
+### GPIO Output Control
+
+If your firmware is compiled with `CONFIG_WOL_GPIO_COMMANDS=y`, you can control specific GPIO pins on the ESP32 by publishing a JSON payload to the main command topic. 
+
+Only pins listed in `CONFIG_WOL_GPIO_ALLOWED_PINS` can be controlled.
+
+**Standard Build (JSON):**
+```json
+{"action":"gpio", "pin":4, "level":1}
+```
+
+**Hardened Build (JSON with TOTP):**
+```json
+{"action":"gpio", "pin":4, "level":1, "totp":123456}
+```
+
+Heimdall will publish a confirmation back to the **Status** topic (`/s`):
+```json
+{"action":"gpio", "pin":4, "level":1, "status":"ok"}
+```
 
 ### TOTP Setup (HARDENED only)
 
