@@ -52,23 +52,27 @@ esp_err_t opsec_init(void);
  * ------------------------------------------------------------------------- */
 
 /**
- * @brief Derive the MQTT command and response topic strings.
+ * @brief Derive the MQTT command, status, and log topic strings.
  *
  * In HARDENED builds (CONFIG_OPSEC_HMAC_TOPIC):
  *   digest         = HMAC-SHA256(secret, chip_mac_bytes)
- *   command_topic  = hex(digest[0..7])   e.g. "d4f3a891c02e57b3"
- *   response_topic = hex(digest[8..15])  e.g. "f10c34a29b7e81d4"
+ *   command_topic  = hex(digest[0..7])    e.g. "d4f3a891c02e57b3"
+ *   status_topic   = hex(digest[8..15])/s e.g. "f10c34a29b7e81d4/s"
+ *   log_topic      = hex(digest[8..15])/l e.g. "f10c34a29b7e81d4/l"
  *
  * In STANDARD builds:
  *   command_topic  = "wol/AA:BB:CC:DD:EE:FF"
- *   response_topic = "wol/AA:BB:CC:DD:EE:FF/r"
+ *   status_topic   = "wol/AA:BB:CC:DD:EE:FF/s"
+ *   log_topic      = "wol/AA:BB:CC:DD:EE:FF/l"
  *
- * @param[out] cmd_topic   Buffer to receive command topic (min OPSEC_TOPIC_MAX_LEN bytes).
- * @param[out] rsp_topic   Buffer to receive response topic (min OPSEC_TOPIC_MAX_LEN bytes).
+ * @param[out] cmd_topic    Buffer for command topic (min OPSEC_TOPIC_MAX_LEN bytes).
+ * @param[out] status_topic Buffer for status topic  (min OPSEC_TOPIC_MAX_LEN bytes).
+ * @param[out] log_topic    Buffer for log topic     (min OPSEC_TOPIC_MAX_LEN bytes).
  * @return ESP_OK on success.
  */
 esp_err_t opsec_derive_topics(char cmd_topic[OPSEC_TOPIC_MAX_LEN],
-                               char rsp_topic[OPSEC_TOPIC_MAX_LEN]);
+                               char status_topic[OPSEC_TOPIC_MAX_LEN],
+                               char log_topic[OPSEC_TOPIC_MAX_LEN]);
 
 /* -------------------------------------------------------------------------
  * Payload parsing and TOTP validation
@@ -117,6 +121,24 @@ esp_err_t opsec_parse_payload(const char *payload, size_t payload_len,
 esp_err_t opsec_extract_ip(const char *payload, size_t payload_len,
                             char ip_out[16]);
 #endif /* CONFIG_WOL_PING_FEEDBACK */
+
+#if CONFIG_OPSEC_TOTP
+/**
+ * @brief Validate a submitted TOTP code against the current time window.
+ *
+ * Used by non-WoL command handlers (e.g. GPIO) in HARDENED builds to
+ * apply the same authentication requirement as opsec_parse_payload().
+ *
+ * Accepts codes within a ±1 window (T-1, T, T+1) identical to the
+ * main TOTP validation path.
+ *
+ * @param submitted_code  The TOTP code as a plain uint32_t integer.
+ * @return ESP_OK if the code is valid.
+ *         ESP_ERR_INVALID_ARG if the code is invalid or expired.
+ *         ESP_ERR_INVALID_STATE if clock is not yet synchronised.
+ */
+esp_err_t opsec_validate_totp_code(uint32_t submitted_code);
+#endif /* CONFIG_OPSEC_TOTP */
 
 /* -------------------------------------------------------------------------
  * SNTP clock synchronisation (required for TOTP)

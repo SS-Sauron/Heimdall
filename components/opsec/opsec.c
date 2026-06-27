@@ -279,14 +279,15 @@ esp_err_t opsec_init(void)
 
 /* --------------------------------------------------------------------------
  * Topic derivation
- * -------------------------------------------------------------------------- */
-esp_err_t opsec_derive_topics(char cmd_topic[OPSEC_TOPIC_MAX_LEN],
-                              char rsp_topic[OPSEC_TOPIC_MAX_LEN])
+ * -------------------------------------------------------------------------- */esp_err_t opsec_derive_topics(char cmd_topic[OPSEC_TOPIC_MAX_LEN],
+                               char status_topic[OPSEC_TOPIC_MAX_LEN],
+                               char log_topic[OPSEC_TOPIC_MAX_LEN])
 {
 #ifdef CONFIG_IDF_TARGET_LINUX
     /* opsec_derive_topics is not used by the linux unit-test build */
     (void)cmd_topic;
-    (void)rsp_topic;
+    (void)status_topic;
+    (void)log_topic;
     return ESP_ERR_NOT_SUPPORTED;
 #else
     /* Read effective MAC (spoofed if OPSEC_IDENTITY on, else eFuse) */
@@ -309,31 +310,41 @@ esp_err_t opsec_derive_topics(char cmd_topic[OPSEC_TOPIC_MAX_LEN],
              digest[0], digest[1], digest[2], digest[3],
              digest[4], digest[5], digest[6], digest[7]);
 
-    /* Response topic: next 8 bytes of digest → 16 hex chars */
-    snprintf(rsp_topic, OPSEC_TOPIC_MAX_LEN,
+    /* Base for status/log: next 8 bytes of digest → 16 hex chars */
+    char base[17];
+    snprintf(base, sizeof(base),
              "%02x%02x%02x%02x%02x%02x%02x%02x",
-             digest[8], digest[9], digest[10], digest[11],
+             digest[8],  digest[9],  digest[10], digest[11],
              digest[12], digest[13], digest[14], digest[15]);
 
+    snprintf(status_topic, OPSEC_TOPIC_MAX_LEN, "%s/s", base);
+    snprintf(log_topic,    OPSEC_TOPIC_MAX_LEN, "%s/l", base);
+
     ESP_LOGI(TAG, "Command  topic: %s", cmd_topic);
-    ESP_LOGI(TAG, "Response topic: %s", rsp_topic);
+    ESP_LOGI(TAG, "Status   topic: %s", status_topic);
+    ESP_LOGI(TAG, "Log      topic: %s", log_topic);
 
 #else
     /* STANDARD build: plain readable topics */
     snprintf(cmd_topic, OPSEC_TOPIC_MAX_LEN,
              "wol/%02X:%02X:%02X:%02X:%02X:%02X",
              mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
-    snprintf(rsp_topic, OPSEC_TOPIC_MAX_LEN,
-             "wol/%02X:%02X:%02X:%02X:%02X:%02X/r",
+    snprintf(status_topic, OPSEC_TOPIC_MAX_LEN,
+             "wol/%02X:%02X:%02X:%02X:%02X:%02X/s",
+             mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+    snprintf(log_topic, OPSEC_TOPIC_MAX_LEN,
+             "wol/%02X:%02X:%02X:%02X:%02X:%02X/l",
              mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
 
     ESP_LOGI(TAG, "Command  topic: %s", cmd_topic);
-    ESP_LOGI(TAG, "Response topic: %s", rsp_topic);
+    ESP_LOGI(TAG, "Status   topic: %s", status_topic);
+    ESP_LOGI(TAG, "Log      topic: %s", log_topic);
 #endif
 
     return ESP_OK;
 #endif /* CONFIG_IDF_TARGET_LINUX */
 }
+
 
 /* --------------------------------------------------------------------------
  * Payload parsing + TOTP validation
@@ -453,6 +464,33 @@ bool opsec_clock_is_synced(void)
 {
     return s_clock_synced;
 }
+
+#if CONFIG_OPSEC_TOTP
+esp_err_t opsec_validate_totp_code(uint32_t submitted_code)
+{
+    if (!s_clock_synced)
+    {
+        ESP_LOGW(TAG, "opsec_validate_totp_code: clock not synchronised");
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    bool valid = false;
+    esp_err_t err = totp_validate(submitted_code, &valid);
+    if (err != ESP_OK)
+        return err;
+
+    if (!valid)
+    {
+        ESP_LOGW(TAG, "opsec_validate_totp_code: invalid code %0*u",
+                 CONFIG_OPSEC_TOTP_DIGITS, submitted_code);
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    ESP_LOGI(TAG, "opsec_validate_totp_code: code %0*u accepted",
+             CONFIG_OPSEC_TOTP_DIGITS, submitted_code);
+    return ESP_OK;
+}
+#endif /* CONFIG_OPSEC_TOTP */
 
 /* --------------------------------------------------------------------------
  * Optional ping feedback: IP address extraction

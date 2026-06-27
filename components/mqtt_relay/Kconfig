@@ -45,4 +45,40 @@ menu "MQTT Relay"
             Enable only for loopback/debug brokers where hostname
             authentication and SNI are intentionally unnecessary.
 
+    config WOL_LEGACY_RSP_TOPIC
+        bool "Also publish to legacy /r response topic (backward compatibility)"
+        default y
+        help
+            When enabled, all status messages are ALSO published to the
+            old single response topic (wol/<mac>/r or the HARDENED
+            equivalent without suffix) in addition to the new /s topic.
+
+            Disable once all MQTT consumers have been updated to subscribe
+            to the /s and /l topics instead.
+
+    config WOL_GPIO_COMMANDS
+        bool "Enable GPIO output control via MQTT"
+        default n
+        help
+            When enabled, the relay accepts GPIO control commands on the
+            same command topic as WoL commands. GPIO commands use a JSON
+            payload with "action":"gpio". In HARDENED builds a valid TOTP
+            code must also be present under a "totp" key.
+
+            Payload format:
+              STANDARD:  {"action":"gpio","pin":4,"level":1}
+              HARDENED:  {"action":"gpio","pin":4,"level":1,"totp":123456}
+
+    config WOL_GPIO_ALLOWED_PINS
+        string "Comma-separated list of GPIO pins allowed for MQTT control"
+        default "4,5"
+        depends on WOL_GPIO_COMMANDS
+        help
+            Only pins listed here can be set via MQTT. This prevents a
+            misconfigured or malicious command from toggling strapping pins
+            (GPIO 0, 2, 12, 15) or UART/Flash pins.
+
+            Default: GPIO 4 and GPIO 5 (safe general-purpose outputs).
+            Example: "4,5,16,17"
+
 endmenu

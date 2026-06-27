@@ -6,10 +6,12 @@
  * is called from that task context for every MQTT event.
  *
  * Event flow:
- *   CONNECTED   → subscribe to command topic, publish "online" to LWT topic
- *   SUBSCRIBED  → log confirmation
- *   DATA        → opsec_parse_payload() → wol_send() → publish response
- *               → [optional] opsec_extract_ip() → wol_ping_start()
+ *   CONNECTED   → subscribe to command topic, publish "online" to status topic
+ *   SUBSCRIBED  → log confirmation, cancel OTA rollback
+ *   DATA        → detect_command_type()
+ *                 ├─ GPIO: gpio_handle_command() [if CONFIG_WOL_GPIO_COMMANDS]
+ *                 └─ WoL:  opsec_parse_payload() → wol_send() → publish_status()
+ *                          → [optional] opsec_extract_ip() → wol_ping_start()
  *   DISCONNECTED→ log (client auto-reconnects)
  *   ERROR       → log TLS / TCP details
  */
@@ -31,65 +33,248 @@
 #include "esp_timer.h"
 #include "esp_ota_ops.h"
 #include "esp_crt_bundle.h"
+#include "cJSON.h"
+#if CONFIG_WOL_GPIO_COMMANDS
+#include "driver/gpio.h"
+#endif
 
 static const char *TAG = "mqtt_relay";
 
 /* Context shared between mqtt_relay_start() and the event handler */
 static char s_cmd_topic[OPSEC_TOPIC_MAX_LEN];
-static char s_rsp_topic[OPSEC_TOPIC_MAX_LEN];
+static char s_status_topic[OPSEC_TOPIC_MAX_LEN]; /* /s — machine JSON, retained */
+static char s_log_topic[OPSEC_TOPIC_MAX_LEN];    /* /l — human diagnostics, not retained */
 static esp_mqtt_client_handle_t s_client = NULL;
 
 /* --------------------------------------------------------------------------
  * Response channel
  *
- * Publishes a brief JSON message to the response topic so the trigger
- * script (and the user) can confirm the packet was dispatched.
+ * publish_status() → /s  — machine-readable JSON, retain=false (WoL events)
+ * publish_log()    → /l  — human-readable diagnostics, retain=false
+ * Both also publish to the legacy /r topic when WOL_LEGACY_RSP_TOPIC=y.
  * -------------------------------------------------------------------------- */
-static void publish_response(const uint8_t mac[6], esp_err_t wol_result)
+static void publish_status(const char *payload)
+{
+#if CONFIG_WOL_RESPONSE_CHANNEL
+    if (s_client == NULL || payload == NULL)
+        return;
+
+    int msg_id = esp_mqtt_client_publish(
+        s_client, s_status_topic, payload, 0, 1, 0);
+    if (msg_id < 0)
+        ESP_LOGW(TAG, "Status publish failed");
+    else
+        ESP_LOGD(TAG, "Status published: %s", payload);
+
+#if CONFIG_WOL_LEGACY_RSP_TOPIC
+    /* Duplicate to legacy topic for backward compatibility */
+    esp_mqtt_client_publish(s_client, s_log_topic, payload, 0, 1, 0);
+#endif
+#else
+    (void)payload;
+#endif
+}
+
+static void publish_log(const char *payload)
+{
+#if CONFIG_WOL_RESPONSE_CHANNEL
+    if (s_client == NULL || payload == NULL)
+        return;
+
+    int msg_id = esp_mqtt_client_publish(
+        s_client, s_log_topic, payload, 0, 1, 0);
+    if (msg_id < 0)
+        ESP_LOGW(TAG, "Log publish failed");
+    else
+        ESP_LOGD(TAG, "Log published: %s", payload);
+#else
+    (void)payload;
+#endif
+}
+
+static void publish_wol_status(const uint8_t mac[6], esp_err_t wol_result)
 {
 #if CONFIG_WOL_RESPONSE_CHANNEL
     if (s_client == NULL)
         return;
 
-    /* Relay health diagnostics — RSSI omitted: it reports the ESP32's own
-     * signal strength to its router, which says nothing about whether the
-     * target PC woke up. Free heap and uptime are actionable instead. */
-    uint32_t heap_free = esp_get_free_heap_size();
-    int64_t  uptime_s  = esp_timer_get_time() / 1000000LL;
-
     char payload[160];
     snprintf(payload, sizeof(payload),
              "{\"mac\":\"%02X:%02X:%02X:%02X:%02X:%02X\","
-             "\"status\":\"%s\","
-             "\"free_heap\":%" PRIu32 ","
-             "\"uptime_s\":%" PRId64 "}",
+             "\"status\":\"%s\"}",
              mac[0], mac[1], mac[2], mac[3], mac[4], mac[5],
-             wol_result == ESP_OK ? "sent" : "error",
-             heap_free,
-             uptime_s
-    );
+             wol_result == ESP_OK ? "sent" : "error");
+    publish_status(payload);
 
-    int msg_id = esp_mqtt_client_publish(
-        s_client,
-        s_rsp_topic,
-        payload,
-        0, /* len=0 → use strlen */
-        1, /* QoS 1 */
-        0  /* retain = false */
-    );
-
-    if (msg_id < 0)
-    {
-        ESP_LOGW(TAG, "Response publish failed (client may be disconnected)");
-    }
-    else
-    {
-        ESP_LOGD(TAG, "Response published (msg_id=%d): %s", msg_id, payload);
-    }
+    /* Health diagnostics go to the log topic, not status */
+    uint32_t heap_free = esp_get_free_heap_size();
+    int64_t  uptime_s  = esp_timer_get_time() / 1000000LL;
+    char log_payload[96];
+    snprintf(log_payload, sizeof(log_payload),
+             "{\"free_heap\":%" PRIu32 ",\"uptime_s\":%" PRId64 "}",
+             heap_free, uptime_s);
+    publish_log(log_payload);
 #else
     (void)mac;
     (void)wol_result;
 #endif
+}
+
+/* --------------------------------------------------------------------------
+ * GPIO command handler
+ * -------------------------------------------------------------------------- */
+#if CONFIG_WOL_GPIO_COMMANDS
+
+/* Parse the allowed-pins string from Kconfig into a bitmask once at startup */
+static uint64_t s_gpio_allowed_mask = 0;
+
+static void gpio_init_allowed_pins(void)
+{
+    /* CONFIG_WOL_GPIO_ALLOWED_PINS is a comma-separated string e.g. "4,5" */
+    char pins_str[] = CONFIG_WOL_GPIO_ALLOWED_PINS;
+    char *tok = pins_str;
+    char *end = pins_str + sizeof(pins_str);
+    while (tok < end && *tok != '\0')
+    {
+        int pin = (int)strtol(tok, &tok, 10);
+        if (pin >= 0 && pin < GPIO_NUM_MAX)
+        {
+            /* Configure pin as output now so we don't do it on the first command */
+            gpio_reset_pin((gpio_num_t)pin);
+            gpio_config_t io_conf = {
+                .pin_bit_mask  = (1ULL << pin),
+                .mode          = GPIO_MODE_OUTPUT,
+                .pull_up_en    = GPIO_PULLUP_DISABLE,
+                .pull_down_en  = GPIO_PULLDOWN_DISABLE,
+                .intr_type     = GPIO_INTR_DISABLE,
+            };
+            gpio_config(&io_conf);
+            /* Safe default: all outputs start LOW */
+            gpio_set_level((gpio_num_t)pin, 0);
+            s_gpio_allowed_mask |= (1ULL << pin);
+            ESP_LOGI(TAG, "GPIO %d configured as output (allowed)", pin);
+        }
+        /* Skip comma or any non-digit */
+        while (tok < end && *tok != '\0' && (*tok < '0' || *tok > '9'))
+            tok++;
+    }
+}
+
+static bool gpio_pin_is_allowed(int pin)
+{
+    if (pin < 0 || pin >= GPIO_NUM_MAX)
+        return false;
+    return (s_gpio_allowed_mask & (1ULL << pin)) != 0;
+}
+
+static void gpio_handle_command(const char *data, int data_len)
+{
+    cJSON *root = cJSON_ParseWithLength(data, (size_t)data_len);
+    if (!root)
+    {
+        ESP_LOGW(TAG, "GPIO: failed to parse JSON payload");
+        return;
+    }
+
+#if CONFIG_OPSEC_TOTP
+    /* HARDENED: require a TOTP code in the "totp" field */
+    cJSON *totp_item = cJSON_GetObjectItemCaseSensitive(root, "totp");
+    if (!cJSON_IsNumber(totp_item))
+    {
+        ESP_LOGW(TAG, "GPIO: missing or non-numeric 'totp' field — rejected");
+        cJSON_Delete(root);
+        return;
+    }
+    uint32_t totp_code = (uint32_t)totp_item->valuedouble;
+    if (opsec_validate_totp_code(totp_code) != ESP_OK)
+    {
+        ESP_LOGW(TAG, "GPIO: TOTP validation failed — command rejected");
+        cJSON_Delete(root);
+        return;
+    }
+#endif /* CONFIG_OPSEC_TOTP */
+
+    cJSON *pin_item   = cJSON_GetObjectItemCaseSensitive(root, "pin");
+    cJSON *level_item = cJSON_GetObjectItemCaseSensitive(root, "level");
+
+    if (!cJSON_IsNumber(pin_item) || !cJSON_IsNumber(level_item))
+    {
+        ESP_LOGW(TAG, "GPIO: 'pin' or 'level' missing or not a number");
+        cJSON_Delete(root);
+        return;
+    }
+
+    int pin   = (int)pin_item->valuedouble;
+    int level = (int)level_item->valuedouble;
+
+    char rsp[96];
+    if (!gpio_pin_is_allowed(pin))
+    {
+        ESP_LOGW(TAG, "GPIO: pin %d is not in the allowed list", pin);
+        snprintf(rsp, sizeof(rsp),
+                 "{\"action\":\"gpio\",\"pin\":%d,"
+                 "\"status\":\"error\",\"reason\":\"invalid_pin\"}", pin);
+        publish_status(rsp);
+        cJSON_Delete(root);
+        return;
+    }
+
+    if (level != 0 && level != 1)
+    {
+        ESP_LOGW(TAG, "GPIO: level %d invalid (must be 0 or 1)", level);
+        snprintf(rsp, sizeof(rsp),
+                 "{\"action\":\"gpio\",\"pin\":%d,"
+                 "\"status\":\"error\",\"reason\":\"invalid_level\"}", pin);
+        publish_status(rsp);
+        cJSON_Delete(root);
+        return;
+    }
+
+    esp_err_t err = gpio_set_level((gpio_num_t)pin, (uint32_t)level);
+    if (err != ESP_OK)
+    {
+        ESP_LOGE(TAG, "GPIO: gpio_set_level(%d, %d) failed: %s",
+                 pin, level, esp_err_to_name(err));
+        snprintf(rsp, sizeof(rsp),
+                 "{\"action\":\"gpio\",\"pin\":%d,\"level\":%d,"
+                 "\"status\":\"error\",\"reason\":\"gpio_fail\"}", pin, level);
+    }
+    else
+    {
+        ESP_LOGI(TAG, "GPIO: pin %d set to %d", pin, level);
+        snprintf(rsp, sizeof(rsp),
+                 "{\"action\":\"gpio\",\"pin\":%d,\"level\":%d,"
+                 "\"status\":\"ok\"}", pin, level);
+    }
+    publish_status(rsp);
+    cJSON_Delete(root);
+}
+#endif /* CONFIG_WOL_GPIO_COMMANDS */
+
+/* --------------------------------------------------------------------------
+ * Command type detection
+ *
+ * Returns 1 for a GPIO JSON command, 0 for a WoL payload (plain or JSON).
+ * Called before any security-critical parsing.
+ * -------------------------------------------------------------------------- */
+static int is_gpio_command(const char *data, int data_len)
+{
+#if CONFIG_WOL_GPIO_COMMANDS
+    if (data_len < 2 || data[0] != '{')
+        return 0;
+    /* Quick scan: look for "action":"gpio" before full JSON parse */
+    /* cJSON is only called if the quick scan succeeds */
+    const char *needle = "\"gpio\"";
+    for (int i = 0; i < data_len - 6; i++)
+    {
+        if (memcmp(data + i, needle, 6) == 0)
+            return 1;
+    }
+#else
+    (void)data;
+    (void)data_len;
+#endif
+    return 0;
 }
 
 /* --------------------------------------------------------------------------
@@ -108,8 +293,9 @@ static void mqtt_event_handler(void *arg, esp_event_base_t base,
     case MQTT_EVENT_CONNECTED:
         ESP_LOGI(TAG, "MQTT connected — subscribing to: %s", s_cmd_topic);
         esp_mqtt_client_subscribe(client, s_cmd_topic, 1);
-        /* Publish "online" status to mirror the LWT offline message */
-        esp_mqtt_client_publish(client, s_rsp_topic,
+        /* Publish "online" to status topic with retain so home automation
+         * systems that reconnect immediately see the current device state */
+        esp_mqtt_client_publish(client, s_status_topic,
                                 "{\"status\":\"online\"}", 0, 1, true);
         break;
 
@@ -135,6 +321,16 @@ static void mqtt_event_handler(void *arg, esp_event_base_t base,
 
         ESP_LOGI(TAG, "Command received (%d bytes)", event->data_len);
 
+        /* --- Command type dispatch --- */
+        if (is_gpio_command(event->data, event->data_len))
+        {
+#if CONFIG_WOL_GPIO_COMMANDS
+            gpio_handle_command(event->data, event->data_len);
+#endif
+            break;
+        }
+
+        /* --- WoL path (existing) --- */
         /* Parse payload and validate TOTP if enabled */
         uint8_t target_mac[6];
         esp_err_t parse_err = opsec_parse_payload(
@@ -153,8 +349,8 @@ static void mqtt_event_handler(void *arg, esp_event_base_t base,
         /* Dispatch the Magic Packet */
         esp_err_t wol_err = wol_send_raw(target_mac);
 
-        /* Publish immediate response (no-op if CONFIG_WOL_RESPONSE_CHANNEL=n) */
-        publish_response(target_mac, wol_err);
+        /* Publish immediate WoL status response */
+        publish_wol_status(target_mac, wol_err);
 
 #if CONFIG_WOL_PING_FEEDBACK
         {
@@ -169,7 +365,7 @@ static void mqtt_event_handler(void *arg, esp_event_base_t base,
                     ip_str,
                     target_mac,
                     s_client,
-                    s_rsp_topic,
+                    s_status_topic,
                     wol_send_time);
 
                 if (ping_err == ESP_ERR_INVALID_STATE)
@@ -266,7 +462,11 @@ void mqtt_relay_start(void)
     /* ------------------------------------------------------------------
      * Step 3: Derive MQTT topics
      * ------------------------------------------------------------------ */
-    ESP_ERROR_CHECK(opsec_derive_topics(s_cmd_topic, s_rsp_topic));
+    ESP_ERROR_CHECK(opsec_derive_topics(s_cmd_topic, s_status_topic, s_log_topic));
+
+#if CONFIG_WOL_GPIO_COMMANDS
+    gpio_init_allowed_pins();
+#endif
 
     /* ------------------------------------------------------------------
      * Step 4: Load credentials and build the broker URI
@@ -312,7 +512,7 @@ void mqtt_relay_start(void)
             .disable_clean_session = false,
             /* Last-will message: broker marks device "offline" on dropout */
             .last_will = {
-                .topic = s_rsp_topic,
+                .topic = s_status_topic,
                 .msg = "{\"status\":\"offline\"}",
                 .msg_len = 0, /* 0 = use strlen */
                 .qos = 1,
@@ -351,10 +551,17 @@ void mqtt_relay_start(void)
      * ------------------------------------------------------------------ */
     while (true)
     {
-        /* Log uptime every 5 minutes at DEBUG level */
+        /* Publish uptime heartbeat to the /l log topic every 5 minutes */
         vTaskDelay(pdMS_TO_TICKS(300000));
+        uint32_t heap_free = esp_get_free_heap_size();
+        int64_t  uptime_s  = esp_timer_get_time() / 1000000LL;
+        char heartbeat[96];
+        snprintf(heartbeat, sizeof(heartbeat),
+                 "{\"free_heap\":%" PRIu32 ",\"uptime_s\":%" PRId64 "}",
+                 heap_free, uptime_s);
+        publish_log(heartbeat);
         ESP_LOGD(TAG, "Relay alive — uptime: %llu s",
-                 (unsigned long long)esp_timer_get_time() / 1000000ULL);
+                 (unsigned long long)uptime_s);
 #if CONFIG_WOL_PING_FEEDBACK
         /* Release resources from any completed ping session */
         wol_ping_cleanup();
