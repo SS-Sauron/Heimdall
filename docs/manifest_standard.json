@@ -8,11 +8,11 @@
       "chipFamily": "ESP32",
       "parts": [
         {
-          "path": "bootloader.bin",
+          "path": "bootloader/bootloader.bin",
           "offset": 4096
         },
         {
-          "path": "partition-table.bin",
+          "path": "partition_table/partition-table.bin",
           "offset": 32768
         },
         {
