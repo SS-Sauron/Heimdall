@@ -46,7 +46,7 @@ static char s_cmd_topic[OPSEC_TOPIC_MAX_LEN];
 static char s_status_topic[OPSEC_TOPIC_MAX_LEN]; /* /s — machine JSON, retained */
 static char s_log_topic[OPSEC_TOPIC_MAX_LEN];    /* /l — human diagnostics, not retained */
 #if CONFIG_WOL_LEGACY_RSP_TOPIC
-static char s_rsp_topic[OPSEC_TOPIC_MAX_LEN];    /* /r — legacy compat topic */
+static char s_rsp_topic[OPSEC_TOPIC_MAX_LEN + 2]; /* /r — legacy compat topic (+2 for "/r" suffix) */
 #endif
 static esp_mqtt_client_handle_t s_client = NULL;
 

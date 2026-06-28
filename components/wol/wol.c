@@ -17,6 +17,7 @@
 
 #include <string.h>
 #include <stdio.h>
+#include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "lwip/sockets.h"
 #include "lwip/netdb.h"
