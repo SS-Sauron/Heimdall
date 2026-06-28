@@ -8,15 +8,15 @@
       "chipFamily": "ESP32",
       "parts": [
         {
-          "path": "https://github.com/SS-Sauron/Heimdall/releases/latest/download/bootloader.bin",
+          "path": "bootloader.bin",
           "offset": 4096
         },
         {
-          "path": "https://github.com/SS-Sauron/Heimdall/releases/latest/download/partition-table.bin",
+          "path": "partition-table.bin",
           "offset": 32768
         },
         {
-          "path": "https://github.com/SS-Sauron/Heimdall/releases/latest/download/heimdall-hardened.bin",
+          "path": "heimdall-hardened.bin",
           "offset": 131072
         }
       ]
