@@ -1,27 +1,245 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
+<!DOCTYPE html><html class="dark" lang="en"><head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Heimdall Portal Login</title>
+<meta content="width=device-width, initial-scale=1.0" name="viewport">
+<title>H̷e̷i̷m̷d̷a̷l̷l̷ Portal - Login</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&amp;family=Newsreader:wght@400;500;600;700&amp;family=Inter:wght@400;500&amp;display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "inverse-surface": "#e5e2e1",
+                        "hazard-red": "#FF4B2B",
+                        "surface-dim": "#131313",
+                        "primary-fixed-dim": "#b8a038", // sickly gold dim
+                        "inverse-on-surface": "#313030",
+                        "on-primary": "#2b2100",
+                        "on-secondary-fixed-variant": "#454748",
+                        "surface-container-high": "#1a1820", // oil-slick dark purple/grey
+                        "ethereal-blue": "#00D1FF",
+                        "tower-grey": "#2D2D2D",
+                        "primary": "#d1b43b", // sickly gold
+                        "secondary-fixed-dim": "#c5c7c8",
+                        "on-tertiary-fixed": "#1c1b1b",
+                        "surface-tint": "#b8a038",
+                        "on-primary-container": "#403100",
+                        "secondary": "#c5c7c8",
+                        "tertiary-fixed": "#e5e2e1",
+                        "on-primary-fixed": "#1f1500",
+                        "oracle-gold": "#C5A030", // Sickly gold
+                        "on-surface-variant": "#a69c8b",
+                        "on-error-container": "#ffdad6",
+                        "on-secondary-container": "#babcbd",
+                        "outline": "#7a7261",
+                        "on-tertiary-fixed-variant": "#474746",
+                        "surface-variant": "#2a2730", // oil-slick dark purple/grey variant
+                        "on-tertiary": "#313030",
+                        "on-tertiary-container": "#454544",
+                        "outline-variant": "#3d3627",
+                        "primary-container": "#8f7514",
+                        "error": "#ffb4ab",
+                        "secondary-fixed": "#e1e3e4",
+                        "on-surface": "#e5e2e1",
+                        "on-primary-fixed-variant": "#4a3a00",
+                        "inverse-primary": "#665100",
+                        "surface-container-highest": "#24202d", // oil-slick dark purple/grey highest
+                        "void-black": "#050505",
+                        "on-secondary": "#2e3132",
+                        "tertiary-container": "#b4b2b2",
+                        "surface-container": "#15131a", // oil-slick dark purple/grey
+                        "primary-fixed": "#e6c855",
+                        "surface-container-low": "#110f14", // oil-slick dark purple/grey
+                        "surface-bright": "#3a3939",
+                        "on-error": "#690005",
+                        "tertiary": "#d0cdcd",
+                        "error-container": "#93000a",
+                        "on-secondary-fixed": "#191c1d",
+                        "surface-container-lowest": "#0b090d", // oil-slick lowest
+                        "secondary-container": "#494c4d",
+                        "on-background": "#e5e2e1",
+                        "tertiary-fixed-dim": "#c8c6c5",
+                        "surface": "#0d0a11", // oil slick base
+                        "background": "#08060a" // deep oil slick
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0.25rem",
+                        "lg": "0.5rem",
+                        "xl": "0.75rem",
+                        "full": "9999px"
+                    },
+                    "spacing": {
+                        "container-max": "1200px",
+                        "margin-mobile": "16px",
+                        "unit": "4px",
+                        "margin-desktop": "64px",
+                        "gutter": "24px"
+                    },
+                    "fontFamily": {
+                        "headline-lg": ["Newsreader"],
+                        "code-sm": ["JetBrains Mono"],
+                        "label-caps": ["JetBrains Mono"],
+                        "headline-md": ["Newsreader"],
+                        "body-md": ["Inter"],
+                        "headline-lg-mobile": ["Newsreader"]
+                    },
+                    "fontSize": {
+                        "headline-lg": ["40px", {"lineHeight": "1.2", "letterSpacing": "-0.02em", "fontWeight": "600"}],
+                        "code-sm": ["13px", {"lineHeight": "1.5", "fontWeight": "400"}],
+                        "label-caps": ["12px", {"lineHeight": "1", "letterSpacing": "0.1em", "fontWeight": "500"}],
+                        "headline-md": ["24px", {"lineHeight": "1.4", "fontWeight": "500"}],
+                        "body-md": ["16px", {"lineHeight": "1.6", "fontWeight": "400"}],
+                        "headline-lg-mobile": ["32px", {"lineHeight": "1.2", "fontWeight": "600"}]
+                    },
+                    "animation": {
+                        'glitch-text': 'glitch 2s linear infinite',
+                        'vsync-tear': 'vsync 8s infinite',
+                        'erratic-pulse': 'erratic 3s infinite',
+                    },
+                    "keyframes": {
+                        glitch: {
+                            '2%, 64%': { transform: 'translate(2px,0) skew(0deg)' },
+                            '4%, 60%': { transform: 'translate(-2px,0) skew(0deg)' },
+                            '62%': { transform: 'translate(0,0) skew(5deg)' },
+                        },
+                        vsync: {
+                            '0%, 95%, 100%': { top: '-10%', opacity: '0' },
+                            '96%': { top: '50%', opacity: '0.8', height: '10px' },
+                            '98%': { top: '110%', opacity: '0.2', height: '40px' },
+                        },
+                        erratic: {
+                            '0%, 100%': { opacity: '0.2', transform: 'scale(0.95)' },
+                            '10%, 12%': { opacity: '0.9', transform: 'scale(1.05)' },
+                            '14%': { opacity: '0.3', transform: 'scale(0.98)' },
+                            '45%': { opacity: '0.2', transform: 'scale(0.95)' },
+                            '48%, 52%': { opacity: '1', transform: 'scale(1.1) rotate(1deg)' },
+                            '55%': { opacity: '0.4', transform: 'scale(1.02)' },
+                            '80%': { opacity: '0.2', transform: 'scale(0.95)' },
+                            '85%': { opacity: '0.8', transform: 'scale(1.03) rotate(-1deg)' },
+                        }
+                    }
+                }
+            }
+        }
+    </script>
 <style>
-body{font-family:ui-sans-serif,system-ui,sans-serif;background:#050505;color:#e5e2e1;margin:0;padding:32px 16px;max-width:420px;margin-left:auto;margin-right:auto}
-h1{font-family:ui-serif,Georgia,serif;font-size:2rem;font-weight:600;text-align:center;margin-bottom:8px}
-p{color:#d0c5af;line-height:1.6;text-align:center;margin-bottom:24px}
-.msg{border:1px solid #d4af37;color:#d4af37;padding:12px;border-radius:8px;margin-bottom:16px}
-label{display:block;font-family:ui-monospace,monospace;font-size:.75rem;text-transform:uppercase;letter-spacing:.1em;color:#d0c5af;margin-bottom:8px}
-input{box-sizing:border-box;width:100%;padding:14px;background:#131313;border:1px solid #2d2d2d;border-radius:8px;color:#e5e2e1;font-family:ui-monospace,monospace;font-size:1.1rem;text-transform:uppercase;letter-spacing:.08em}
-button{width:100%;padding:16px;margin-top:20px;background:transparent;border:1px solid #d4af37;border-radius:9999px;color:#d4af37;font-size:1rem;cursor:pointer;text-transform:uppercase;letter-spacing:.1em;font-weight:500}
-button:hover{background:#d4af37;color:#050505}
-</style>
+        .crt-overlay {
+            background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.45) 50%), linear-gradient(90deg, rgba(255, 0, 0, 0.08), rgba(0, 255, 0, 0.03), rgba(0, 0, 255, 0.08));
+            background-size: 100% 4px, 4px 100%;
+            pointer-events: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            z-index: 9999;
+            opacity: 0.35;
+            box-shadow: inset 0 0 120px rgba(0,0,0,0.95);
+        }
+        
+        .vsync-line {
+            position: fixed;
+            left: 0;
+            width: 100%;
+            height: 2px;
+            background: rgba(255, 255, 255, 0.1);
+            z-index: 9998;
+            pointer-events: none;
+            box-shadow: 0 0 10px rgba(255,255,255,0.2), 0 0 30px rgba(197, 160, 48, 0.1);
+        }
+
+        .oracle-glow {
+            background: radial-gradient(circle at center, rgba(143, 117, 20, 0.15) 0%, rgba(36, 32, 45, 0.4) 40%, rgba(8, 6, 10, 0.9) 80%);
+            animation: pulse-glow 7s infinite alternate ease-in-out;
+        }
+
+        @keyframes pulse-glow {
+            0% { opacity: 0.6; transform: scale(0.95); }
+            100% { opacity: 1; transform: scale(1.05); }
+        }
+
+        .morse-glow {
+            position: absolute;
+            width: 160px;
+            height: 160px;
+            background: radial-gradient(circle, rgba(197, 160, 48, 0.25) 0%, rgba(255, 0, 0, 0.15) 30%, rgba(197, 160, 48, 0) 70%);
+            border-radius: 50%;
+            z-index: -1;
+            filter: blur(15px);
+        }
+
+        .glass-card {
+            background: rgba(17, 15, 20, 0.7);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid rgba(197, 160, 48, 0.1);
+            box-shadow: 0 15px 50px -12px rgba(0,0,0,1), inset 0 0 30px rgba(0,0,0,0.5);
+        }
+        
+        .bleeding-glow {
+            box-shadow: 0 0 20px rgba(197, 160, 48, 0.2), 0 5px 15px rgba(255, 75, 43, 0.3);
+        }
+        
+        .bleeding-glow:hover {
+            box-shadow: 0 0 30px rgba(197, 160, 48, 0.4), 0 10px 25px rgba(255, 75, 43, 0.5);
+        }
+    </style>
+<style>
+    body {
+      min-height: max(884px, 100dvh);
+    }
+  </style>
 </head>
-<body>
-<h1>Heimdall Portal</h1>
-<p>Authentication required to access device configuration.</p>
-<form method="POST" action="/login">
-<label for="password">Device Password</label>
-<input id="password" name="password" type="password" maxlength="8" pattern="[A-F0-9]{8}" autocomplete="off" inputmode="text" required>
-<button type="submit">Authenticate</button>
+<body class="bg-[radial-gradient(ellipse_at_center,_#110f14_0%,_#050505_100%)] text-on-surface min-h-screen flex items-center justify-center font-body-md overflow-hidden relative">
+<!-- Ambient Background -->
+<div class="absolute inset-0 oracle-glow pointer-events-none z-0"></div>
+<div class="crt-overlay"></div>
+<div class="vsync-line animate-vsync-tear"></div>
+<!-- Main Content Canvas -->
+<main class="w-full max-w-[600px] px-margin-mobile md:px-0 relative z-10">
+<!-- The Monolith Container -->
+<div class="glass-card rounded-[2rem] py-12 px-6 md:px-12 relative flex flex-col items-center">
+<!-- Logo / Eye -->
+<div class="mb-8 flex flex-col items-center justify-center relative">
+<div class="relative flex items-center justify-center mb-6 w-24 h-24">
+<div class="morse-glow animate-erratic-pulse"></div>
+<span class="material-symbols-outlined text-oracle-gold text-6xl drop-shadow-[0_0_15px_rgba(197,160,48,0.4)] animate-erratic-pulse relative z-10" style="font-variation-settings: 'FILL' 1, 'wght' 200;">visibility</span>
+<span class="material-symbols-outlined text-hazard-red/40 text-4xl absolute -top-2 -right-4 animate-pulse blur-[1px]" style="font-variation-settings: 'FILL' 1, 'wght' 100; animation-duration: 2s;">visibility</span>
+<span class="material-symbols-outlined text-hazard-red/30 text-3xl absolute bottom-0 -left-6 animate-pulse blur-[1px]" style="font-variation-settings: 'FILL' 1, 'wght' 100; animation-duration: 4s; animation-delay: 1s;">visibility</span>
+</div>
+<h1 class="text-headline-lg-mobile md:text-headline-lg font-headline-lg-mobile md:font-headline-lg bg-gradient-to-b from-[#e6c855] via-[#C5A030] to-[#665100] text-transparent bg-clip-text tracking-tighter text-center pb-1 animate-glitch-text mix-blend-difference">H̷e̷i̷m̷d̷a̷l̷l̷ Portal</h1>
+<p class="text-[#a69c8b] text-center mt-3 font-body-md max-w-[85%] text-sm tracking-wide" style="letter-spacing: 0.05em; transition: letter-spacing 0.5s;">Enter the permanent portal password printed on the serial console.</p>
+</div>
+<!-- Aetheric Terminal Message -->
+<div class="w-full border border-outline-variant bg-[#0b090d]/80 rounded-xl p-4 mb-8 flex items-start gap-4 shadow-inner relative overflow-hidden">
+<div class="absolute top-0 left-0 w-1 h-full bg-hazard-red/40"></div>
+<span class="material-symbols-outlined text-hazard-red/70 mt-1 animate-pulse" style="font-variation-settings: 'FILL' 0, 'wght' 300;">lock</span>
+<p class="text-code-sm font-code-sm text-[#a69c8b] flex-1 uppercase tracking-widest leading-relaxed">
+                    The portal remains locked until the correct 8-character password is submitted.
+                </p>
+</div>
+<!-- Login Form -->
+<form action="/login" class="w-full flex flex-col gap-8" method="POST">
+<div class="relative flex flex-col gap-2">
+<label class="text-label-caps font-label-caps text-oracle-gold ml-2 opacity-80" for="portal_password">PORTAL P̷A̷S̷S̷W̷O̷R̷D̷</label>
+<div class="relative w-full">
+<input autocomplete="off" class="w-full font-code-sm text-code-sm tracking-widest py-4 px-6 rounded-2xl bg-[#0b090d]/90 border border-outline-variant focus:border-oracle-gold focus:ring-1 focus:ring-oracle-gold/30 text-[#e6c855] placeholder-[#4a3a00] transition-all outline-none shadow-inner" id="portal_password" maxlength="8" name="password" placeholder="••••••••" required="" type="password">
+</div>
+</div>
+<div class="mt-4 flex justify-center w-full">
+<button class="w-full rounded-full bg-gradient-to-r from-[#8f7514] via-[#665100] to-[#3d3627] text-[#e6c855] font-label-caps text-label-caps py-4 px-8 uppercase tracking-[0.2em] flex items-center justify-center gap-3 bleeding-glow border border-[#8f7514]/30 hover:-translate-y-0.5 transition-all duration-300 relative overflow-hidden group mix-blend-exclusion" type="submit">
+<span class="absolute inset-0 bg-hazard-red/10 translate-y-full group-hover:translate-y-0 transition-transform duration-500 ease-out rounded-full"></span>
+<span class="relative flex items-center gap-3 z-10 drop-shadow-md">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1, 'wght' 500;">vpn_key</span>
+                            Unlock Portal
+                        </span>
+</button>
+</div>
 </form>
-</body>
-</html>
+</div>
+</main>
+
+
+</body></html>
