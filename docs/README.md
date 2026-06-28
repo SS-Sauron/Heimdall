@@ -547,26 +547,24 @@ Heimdall supports over-the-air (OTA) updates. The partition table is dual-slot (
 
 **Rollback Protection:** When a new firmware is flashed, the bootloader boots from the new slot. The firmware must explicitly prove it is functional before the bootloader makes the change permanent. Heimdall does this in `mqtt_relay.c` by calling `esp_ota_mark_app_valid_cancel_rollback()` *only after* successfully connecting to the MQTT broker and subscribing to the command topic. If the new firmware crashes or cannot reach the broker, the bootloader automatically rolls back to the previous known-good slot on the next reboot.
 
-### How to update
+### How to Update (Current)
 
-**Prerequisites:**
-- The device must be online and reachable on your local network.
-- `CONFIG_OTA_ALLOW_HTTP=y` must be enabled in your build (it is on by default).
-- You must have ESP-IDF sourced in your shell (`. $IDF_PATH/export.sh`).
+> **Note: Wireless OTA push is not yet implemented.** The OTA receiver task (port 3232, `espota.py` transport) is planned for a future release. `CONFIG_OTA_ALLOW_HTTP=y` in `sdkconfig.defaults` enables the *OTA client* to accept HTTP sources but does not start an OTA listener server.
 
-**1. Build the new firmware**
+Use one of these methods to update firmware today:
+
+**Option A — Web Flasher (recommended, no tools needed)**
+Visit [https://ss-sauron.github.io/Heimdall/](https://ss-sauron.github.io/Heimdall/), connect your ESP32 via USB, and flash directly from the browser.
+
+**Option B — Build from source**
 ```bash
-idf.py build
+idf.py build flash
 ```
 
-**2. Push to the device**
-Use the provided OTA helper script. Pass the device's IP address:
-```bash
-./scripts/ota_push.sh --host 192.168.1.42
-```
-The script uses ESP-IDF's `espota.py` to transfer the binary over plain HTTP on port 3232.
+### Planned: Wireless OTA Push
 
-> **Warning:** Because the transport is unencrypted HTTP, you should only use this on a trusted local network. Do not expose port 3232 to the internet.
+A future release will add an OTA receiver task to the firmware, enabling wireless updates over the local network using `espota.py` on port 3232. The rollback guarantee described above will apply to wireless updates as well.
+
 
 ---
 

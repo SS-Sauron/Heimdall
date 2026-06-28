@@ -64,13 +64,13 @@ CONFIG_MQTT_RELAY_TASK_STACK_KB=8
 # -----------------------------------------------------------------------------
 CONFIG_BOOTLOADER_LOG_LEVEL_WARN=y
 
-# -----------------------------------------------------------------------------
-# OTA
-# Enable rollback so a failed firmware update reverts to the previous slot.
-# -----------------------------------------------------------------------------
+# Enable OTA rollback so a failed firmware update reverts to the previous slot.
 CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y
-# Allow plain-HTTP OTA source for local-network updates via scripts/ota_push.sh.
-# Transport is espota.py on TCP port 3232 — only use on a trusted LAN.
+# Allow the OTA *client* to accept plain-HTTP firmware sources.
+# NOTE: This does NOT start an OTA receiver server. Wireless OTA push
+# (espota.py on port 3232) is planned but not yet implemented in the firmware.
+# To update firmware, use the Web Flasher at https://ss-sauron.github.io/Heimdall/
+# or run: idf.py build flash
 CONFIG_OTA_ALLOW_HTTP=y
 
 

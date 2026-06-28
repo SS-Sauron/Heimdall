@@ -427,16 +427,15 @@ If you connected an LED to GPIO2 (or your configured `CONFIG_WOL_STATUS_LED_PIN`
 
 ## ✦ Over-The-Air (OTA) Updates
 
-Heimdall supports dual-slot OTA updates with automatic rollback. You don't need to plug the ESP32 into your computer to update the firmware.
+Heimdall uses a dual-slot OTA partition table with automatic rollback. If the new firmware crashes on boot or fails to reach the MQTT broker, the bootloader automatically reverts to the previous working slot.
 
-If `CONFIG_OTA_ALLOW_HTTP=y` is enabled in your `sdkconfig.defaults`, you can flash a new build over your local network using the provided script:
+> [!NOTE]
+> **Wireless OTA push is not yet implemented.** The OTA receiver task (listening on port 3232 for `espota.py` pushes) is planned for a future release. For now, use one of the following methods to update the firmware:
+>
+> - **[Web Flasher](https://ss-sauron.github.io/Heimdall/)** — Flash directly from your browser over USB. No tools required.
+> - **`idf.py flash`** — Rebuild from source and flash over USB with the ESP-IDF toolchain.
 
-```bash
-./scripts/ota_push.sh --host <esp32-ip-address> [--bin build/wol_relay.bin]
-```
-
-> [!WARNING]
-> The OTA transport is plain HTTP (port 3232) and should only be used on a trusted local network. If the new firmware crashes upon boot, the ESP32 will automatically reboot and roll back to the previous working firmware slot.
+The rollback guarantee is already active: once the new firmware successfully connects to your MQTT broker, it calls `esp_ota_mark_app_valid_cancel_rollback()` to permanently commit the update.
 
 ---
 
