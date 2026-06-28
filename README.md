@@ -96,7 +96,23 @@ That's it. No extra components required.
 
 ---
 
-## ✦ Prerequisites
+## ✦ Web Flasher (No IDE Required)
+
+The easiest way to install Heimdall is directly from your browser using the official Web Flasher. You don't need to install any development tools or compile anything from source.
+
+**[🚀 Launch the Heimdall Web Flasher](https://ss-sauron.github.io/Heimdall/)**
+
+1. Connect your ESP32 to your computer via USB.
+2. Open the link above in a supported browser (Chrome, Edge, or Opera).
+3. Choose your desired build profile (Standard or Hardened) and click **Connect**.
+4. Select the COM port for your ESP32.
+5. Click **Install Heimdall** and wait for the flash to complete.
+
+Once flashed, skip down to **Step 4** in the Quick Start below to connect to the captive portal and provision your credentials.
+
+---
+
+## ✦ Prerequisites (Building from Source)
 
 Before building, make sure the ESP-IDF environment is installed and exported in your shell.
 
@@ -118,7 +134,7 @@ idf.py --version
 
 ---
 
-## ✦ Quick Start
+## ✦ Quick Start (Building from Source)
 
 **1. Clone the project**
 
