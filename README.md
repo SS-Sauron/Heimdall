@@ -10,8 +10,9 @@
 
 <br>
 
-[![Version](https://img.shields.io/badge/version-v0.3.0-blueviolet?style=for-the-badge)](https://github.com/SS-Sauron/Heimdall/releases)
+[![Version](https://img.shields.io/badge/version-v0.4.5-blueviolet?style=for-the-badge)](https://github.com/SS-Sauron/Heimdall/releases)
 [![CI](https://img.shields.io/github/actions/workflow/status/SS-Sauron/Heimdall/build.yml?style=for-the-badge)](https://github.com/SS-Sauron/Heimdall/actions/workflows/build.yml)
+[![Web Flasher](https://img.shields.io/badge/Web%20Flasher-Live-brightgreen?style=for-the-badge&logo=googlechrome&logoColor=white)](https://ss-sauron.github.io/Heimdall/)
 [![ESP-IDF](https://img.shields.io/badge/ESP--IDF-v6.0.1-E7352C?style=for-the-badge&logo=espressif&logoColor=white)](https://idf.espressif.com/)
 [![Platform](https://img.shields.io/badge/ESP32-classic-E7352C?style=for-the-badge&logo=espressif&logoColor=white)](https://www.espressif.com/)
 [![License](https://img.shields.io/badge/license-Apache--2.0-brightgreen?style=for-the-badge)](LICENSE)
@@ -59,6 +60,8 @@ You send a command. Heimdall wakes your machine. That's it.
 | 🔌 | **GPIO Output Control** — Remotely toggle specific ESP32 pins (e.g. for physical relays). Secured by TOTP in HARDENED builds |
 | 🛡️ | **SecureOn Password** — Wake modern motherboards that require a 6-byte SecureOn password appended to the magic packet |
 | 💡 | **Status LED** — Visual feedback for portal, connecting, ready, and wake-sent states |
+| 🔁 | **Crash Loop Detection** — Counts consecutive firmware crashes in NVS and automatically falls back to the captive portal after 5 panics |
+| 🌍 | **Web Flasher** — Flash firmware directly from your browser via USB. No IDE or toolchain required |
 
 ---
 
@@ -470,6 +473,19 @@ Heimdall/
 ├── partitions.csv      # OTA-ready dual-slot partition table
 └── sdkconfig.defaults  # Baseline Kconfig configuration
 ```
+
+---
+
+## ✦ CI/CD Pipeline
+
+Every push to `main` triggers an automated GitHub Actions workflow that:
+
+- **Builds** both STANDARD and HARDENED firmware profiles in parallel using the official Espressif ESP-IDF Docker image.
+- **Deploys** the Web Flasher to GitHub Pages, bundling the freshly compiled `.bin` files alongside the flasher UI so users can always flash the latest code from their browser.
+
+Every Git tag (`v1.0.0`) additionally:
+
+- **Creates a GitHub Release** and attaches the compiled `heimdall-standard.bin` and `heimdall-hardened.bin` as downloadable artifacts.
 
 ---
 
