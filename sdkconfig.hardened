@@ -1,0 +1,17 @@
+# =============================================================================
+# wol_relay — sdkconfig.hardened
+# Hardened build profile override — layered on top of sdkconfig.defaults
+# via:  SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.hardened"
+#
+# Only overrides values that differ from the standard profile.
+# All other settings (flash, partitions, WiFi, MQTT, OTA, etc.)
+# are inherited from sdkconfig.defaults.
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# WoL Relay build profile — HARDENED
+# Enables OPSEC features: HMAC-derived topics, TOTP auth, MAC spoofing,
+# hostname obfuscation.
+# -----------------------------------------------------------------------------
+CONFIG_WOL_PROFILE_STANDARD=n
+CONFIG_WOL_PROFILE_HARDENED=y

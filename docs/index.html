@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Heimdall | Web Flasher</title>
+    <style>
+        :root {
+            --bg-color: #0d1117;
+            --text-color: #c9d1d9;
+            --accent-color: #58a6ff;
+            --card-bg: #161b22;
+            --border-color: #30363d;
+            --danger-color: #f85149;
+            --success-color: #2ea043;
+            --font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        }
+
+        body {
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            font-family: var(--font-family);
+            line-height: 1.6;
+            margin: 0;
+            padding: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+        }
+
+        .container {
+            max-width: 800px;
+            margin: 40px auto;
+            padding: 40px;
+            background-color: var(--card-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+        }
+
+        h1 {
+            text-align: center;
+            color: #ffffff;
+            margin-top: 0;
+            font-size: 2.5rem;
+        }
+
+        .tagline {
+            text-align: center;
+            font-style: italic;
+            color: #8b949e;
+            margin-bottom: 40px;
+        }
+
+        .profiles-container {
+            display: flex;
+            gap: 20px;
+            margin-bottom: 40px;
+        }
+
+        .profile-card {
+            flex: 1;
+            padding: 20px;
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            background-color: #0d1117;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .profile-card h2 {
+            color: var(--accent-color);
+            margin-top: 0;
+            text-align: center;
+        }
+
+        .profile-card h2.hardened {
+            color: var(--danger-color);
+        }
+
+        .profile-card ul {
+            padding-left: 20px;
+            flex-grow: 1;
+        }
+
+        .install-container {
+            text-align: center;
+            margin-top: 20px;
+        }
+
+        .troubleshooting {
+            margin-top: 50px;
+            padding: 20px;
+            border: 1px solid #d29922;
+            border-radius: 6px;
+            background-color: rgba(210, 153, 34, 0.1);
+        }
+
+        .troubleshooting h3 {
+            color: #d29922;
+            margin-top: 0;
+        }
+
+        a {
+            color: var(--accent-color);
+            text-decoration: none;
+        }
+
+        a:hover {
+            text-decoration: underline;
+        }
+
+        /* Customize the esp-web-install-button slot if needed, though it handles its own shadow DOM */
+        esp-web-install-button {
+            display: inline-block;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <h1>Heimdall</h1>
+        <div class="tagline">Always watching. Never sleeping. Ready to wake the dead.</div>
+
+        <p>Welcome to the Heimdall Web Flasher. You can install Heimdall directly to your ESP32 from your browser. <strong>Important:</strong> Check the "Erase device" box during installation if you are flashing for the first time or want to reset your Captive Portal credentials.</p>
+
+        <div class="profiles-container">
+            <div class="profile-card">
+                <h2>Standard Profile</h2>
+                <p>Plug-and-play defaults for typical home networks.</p>
+                <ul>
+                    <li>Standard MQTT topics</li>
+                    <li>No authentication on MQTT commands</li>
+                    <li>Uses default device MAC address</li>
+                </ul>
+                <div class="install-container">
+                    <esp-web-install-button manifest="manifest_standard.json"></esp-web-install-button>
+                </div>
+            </div>
+
+            <div class="profile-card">
+                <h2 class="hardened">Hardened Profile</h2>
+                <p>Maximum OPSEC for hostile environments.</p>
+                <ul>
+                    <li>HMAC-derived stealth MQTT topics</li>
+                    <li>Time-based One-Time Password (TOTP) auth</li>
+                    <li>MAC Address Spoofing</li>
+                    <li>Hostname Obfuscation</li>
+                </ul>
+                <div class="install-container">
+                    <esp-web-install-button manifest="manifest_hardened.json"></esp-web-install-button>
+                </div>
+            </div>
+        </div>
+
+        <div class="troubleshooting">
+            <h3>⚠️ Troubleshooting</h3>
+            <p><strong>Device not showing up in the list?</strong></p>
+            <ul>
+                <li><strong>Cables:</strong> You are likely using a charge-only USB cable. You MUST use a data cable. Try another cable first!</li>
+                <li><strong>Drivers:</strong> Your computer might be missing the USB-to-UART drivers. Download them here:
+                    <ul>
+                        <li><a href="https://www.silabs.com/developers/usb-to-uart-bridge-vcp-drivers" target="_blank">Silicon Labs CP2102 Drivers</a></li>
+                        <li><a href="https://www.wch-ic.com/downloads/CH341SER_ZIP.html" target="_blank">WCH CH340 Drivers</a></li>
+                    </ul>
+                </li>
+                <li><strong>Browser:</strong> This feature uses the Web Serial API. It only works in Chromium-based browsers like Google Chrome, Microsoft Edge, or Brave. (Firefox and Safari are not supported).</li>
+            </ul>
+        </div>
+    </div>
+
+    <!-- Import ESP Web Tools -->
+    <script type="module" src="https://unpkg.com/esp-web-tools@10/dist/web/install-button.js?module"></script>
+</body>
+</html>

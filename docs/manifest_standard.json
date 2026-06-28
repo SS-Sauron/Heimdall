@@ -1,0 +1,25 @@
+{
+  "name": "Heimdall — Standard",
+  "version": "1.0",
+  "home_assistant_domain": null,
+  "new_install_skip_erase": false,
+  "builds": [
+    {
+      "chipFamily": "ESP32",
+      "parts": [
+        {
+          "path": "https://github.com/SS-Sauron/Heimdall/releases/latest/download/bootloader.bin",
+          "offset": 4096
+        },
+        {
+          "path": "https://github.com/SS-Sauron/Heimdall/releases/latest/download/partition-table.bin",
+          "offset": 32768
+        },
+        {
+          "path": "https://github.com/SS-Sauron/Heimdall/releases/latest/download/heimdall-standard.bin",
+          "offset": 131072
+        }
+      ]
+    }
+  ]
+}

@@ -11,10 +11,24 @@ permissions:
   contents: write
 
 jobs:
-  # ── Job 1: Build the main firmware ──────────────────────────────────────────
+  # ── Job 1: Build firmware (matrix: standard + hardened) ──────────────────────
   build:
-    name: Build Firmware (ESP32)
+    name: Build Firmware (${{ matrix.profile }})
     runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        profile: [ standard, hardened ]
+        include:
+          - profile: standard
+            sdkconfig_defaults: sdkconfig.defaults
+            artifact_name: heimdall-standard-firmware
+            bin_name: heimdall-standard.bin
+          - profile: hardened
+            sdkconfig_defaults: sdkconfig.defaults;sdkconfig.hardened
+            artifact_name: heimdall-hardened-firmware
+            bin_name: heimdall-hardened.bin
 
     steps:
       - name: Checkout repository
@@ -23,17 +37,23 @@ jobs:
           # Fetch full history so git describe produces a real version string
           fetch-depth: 0
 
-      - name: Build with ESP-IDF v6.0.1
+      - name: Build with ESP-IDF v6.0.1 (${{ matrix.profile }} profile)
         uses: espressif/esp-idf-ci-action@v1
         with:
           esp_idf_version: v6.0.1
           target: esp32
           command: idf.py build
+        env:
+          SDKCONFIG_DEFAULTS: ${{ matrix.sdkconfig_defaults }}
+
+      - name: Rename app binary to profile-specific name
+        if: success()
+        run: cp build/wol_relay.bin build/${{ matrix.bin_name }}
 
       - name: Report binary size
         if: success()
         run: |
-          echo "## Firmware Size Report" >> $GITHUB_STEP_SUMMARY
+          echo "## Firmware Size Report (${{ matrix.profile }})" >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
           ls -lh build/*.bin 2>/dev/null | awk '{print $5, $9}' >> $GITHUB_STEP_SUMMARY || echo "build artifacts not accessible" >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
@@ -42,14 +62,14 @@ jobs:
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: heimdall-firmware-${{ github.sha }}
+          name: ${{ matrix.artifact_name }}-${{ github.sha }}
           path: |
-            build/wol_relay.bin
+            build/${{ matrix.bin_name }}
             build/bootloader/bootloader.bin
             build/partition_table/partition-table.bin
           retention-days: 30
 
-  # ── Job 2: Release (runs only on pushed tags) ───────────────────────────────
+  # ── Job 2: Release (runs only on pushed tags) ─────────────────────────────────
   release:
     name: Create GitHub Release
     runs-on: ubuntu-latest
@@ -57,17 +77,24 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/v')
 
     steps:
-      - name: Download firmware artifacts
+      - name: Download standard firmware artifacts
         uses: actions/download-artifact@v4
         with:
-          name: heimdall-firmware-${{ github.sha }}
-          path: artifacts
+          name: heimdall-standard-firmware-${{ github.sha }}
+          path: artifacts/standard
+
+      - name: Download hardened firmware artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: heimdall-hardened-firmware-${{ github.sha }}
+          path: artifacts/hardened
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
           generate_release_notes: true
           files: |
-            artifacts/wol_relay.bin
-            artifacts/bootloader/bootloader.bin
-            artifacts/partition_table/partition-table.bin
+            artifacts/standard/bootloader/bootloader.bin
+            artifacts/standard/partition_table/partition-table.bin
+            artifacts/standard/heimdall-standard.bin
+            artifacts/hardened/heimdall-hardened.bin
