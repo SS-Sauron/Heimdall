@@ -465,12 +465,15 @@ Heimdall/
 │   ├── storage/        # NVS credential persistence
 │   ├── wifi_sta/       # WiFi station with self-healing
 │   └── wol/            # Magic packet builder & broadcaster (SecureOn support)
+├── docs/               # Extended documentation and Web Flasher UI (GitHub Pages)
+├── experimental/       # Sandbox for upcoming features and design files
 ├── main/               # Boot sequence & orchestration
 ├── resources/          # README images and visual design assets
 ├── scripts/            # MQTT trigger helpers and Windows WoL setup helper
 ├── .clangd             # IDE language server config (clangd + ESP-IDF/GCC compatibility)
 ├── partitions.csv      # OTA-ready dual-slot partition table
-└── sdkconfig.defaults  # Baseline Kconfig configuration
+├── sdkconfig.defaults  # Baseline Kconfig configuration for STANDARD profile
+└── sdkconfig.hardened  # Kconfig overrides for the HARDENED profile
 ```
 
 ---
