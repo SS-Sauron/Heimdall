@@ -409,6 +409,19 @@ Any RFC 6238-compatible authenticator app or trigger script can generate codes f
 
 ---
 
+### ✦ Status LED Patterns
+
+If you connected an LED to GPIO2 (or your configured `CONFIG_STATUS_LED_GPIO`), Heimdall provides real-time visual feedback:
+
+| State | LED Pattern | Description |
+|---|---|---|
+| **Portal Mode** | Rapid Blinking (5Hz) | Waiting for you to connect to the Heimdall WiFi setup portal |
+| **Connecting** | Slow Blinking (1Hz) | Attempting to connect to WiFi and the MQTT broker |
+| **Ready** | Solid ON | Connected and actively listening for wake commands |
+| **Wake Sent** | 5x Rapid Flashes | Magic packet successfully dispatched |
+
+---
+
 ## ✦ Over-The-Air (OTA) Updates
 
 Heimdall supports dual-slot OTA updates with automatic rollback. You don't need to plug the ESP32 into your computer to update the firmware.
