@@ -29,14 +29,20 @@
 #
 # USAGE
 # -----
-#   ./scripts/ota_push.sh --host <DEVICE_IP> [--bin <path/to/wol_relay.bin>]
+#   ./scripts/ota_push.sh --host <DEVICE_IP> [--bin <path/to/firmware.bin>]
 #
 # EXAMPLES
 #   # Push the default build output to device at 192.168.1.42
 #   ./scripts/ota_push.sh --host 192.168.1.42
 #
-#   # Push a specific binary (e.g. a downloaded release build)
-#   ./scripts/ota_push.sh --host 192.168.1.42 --bin ~/Downloads/wol_relay.bin
+#   # Push a downloaded release binary
+#   ./scripts/ota_push.sh --host 192.168.1.42 --bin ~/Downloads/heimdall-standard.bin
+#
+# NOTE ON BINARY NAME
+# -------------------
+# The ESP-IDF cmake project is named "wol_relay" (see CMakeLists.txt), so the
+# local build output is always build/wol_relay.bin. Downloaded release binaries
+# are named heimdall-standard.bin or heimdall-hardened.bin — pass either with --bin.
 #
 # =============================================================================
 
@@ -80,6 +86,7 @@ if [[ ! -f "$FIRMWARE_BIN" ]]; then
     echo "ERROR: Firmware binary not found: $FIRMWARE_BIN"
     echo ""
     echo "If you haven't built yet, run:  idf.py build"
+    echo "The local build output is:      build/wol_relay.bin"
     echo "Or download a release binary from:"
     echo "  https://github.com/SS-Sauron/Heimdall/releases"
     exit 1
@@ -126,7 +133,7 @@ echo ""
 echo "  ✓ Upload complete!"
 echo ""
 echo "  The device is now rebooting with the new firmware."
-echo "  Watch the MQTT response topic for {\"status\":\"online\"} to"
+echo "  Watch the MQTT status topic for {\"status\":\"online\"} to"
 echo "  confirm the update succeeded and rollback was cancelled."
 echo ""
 echo "  If the device does not reconnect within ~60 seconds, it will"
