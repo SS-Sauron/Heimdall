@@ -62,15 +62,20 @@ jobs:
           ls -lh build/*.bin 2>/dev/null | awk '{print $5, $9}' >> $GITHUB_STEP_SUMMARY || echo "build artifacts not accessible" >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
 
+      - name: Prepare artifact folder
+        if: success()
+        run: |
+          mkdir -p artifact_out
+          cp build/${{ matrix.bin_name }} artifact_out/
+          cp build/bootloader/bootloader.bin artifact_out/
+          cp build/partition_table/partition-table.bin artifact_out/
+
       - name: Upload firmware artifacts
         if: success()
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact_name }}-${{ github.sha }}
-          path: |
-            build/${{ matrix.bin_name }}
-            build/bootloader/bootloader.bin
-            build/partition_table/partition-table.bin
+          path: artifact_out/*
           retention-days: 30
 
   # ── Job 2: Release (runs only on pushed tags) ─────────────────────────────────
@@ -98,8 +103,8 @@ jobs:
         with:
           generate_release_notes: true
           files: |
-            artifacts/standard/bootloader/bootloader.bin
-            artifacts/standard/partition_table/partition-table.bin
+            artifacts/standard/bootloader.bin
+            artifacts/standard/partition-table.bin
             artifacts/standard/heimdall-standard.bin
             artifacts/hardened/heimdall-hardened.bin
 
