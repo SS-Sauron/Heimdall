@@ -94,7 +94,7 @@ You send a command. Heimdall wakes your machine. That's it.
 - **ESP32** (classic) development board
 - Connected to your local WiFi network
 - Access to an MQTT broker (local or cloud, port 1883 or 8883 TLS)
-- *(Optional)* An LED connected to GPIO2 (or configured pin) for visual status feedback
+- *(Optional)* The ESP32's built-in LED is used for visual status feedback by default (can be disabled for stealth)
 
 That's it. No extra components required.
 
@@ -423,7 +423,7 @@ Any RFC 6238-compatible authenticator app or trigger script can generate codes f
 
 ### ✦ Status LED Patterns
 
-If you connected an LED to GPIO2 (or your configured `CONFIG_WOL_STATUS_LED_PIN`), Heimdall provides real-time visual feedback:
+Heimdall provides real-time visual feedback using the ESP32's built-in LED (GPIO2) out of the box. You also have the option to wire an external LED to a custom pin, or disable the LED completely in the configuration for "stealth" deployments.
 
 | State | LED Pattern | Description |
 |---|---|---|

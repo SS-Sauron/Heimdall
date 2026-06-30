@@ -342,7 +342,7 @@ This works correctly on any subnet — 192.168.x.x, 10.x.x.x, 172.16.x.x, or any
 
 **Files:** `components/status_led/status_led.c`, `components/status_led/status_led.h`
 
-Provides visual feedback using a single GPIO pin (typically the built-in LED). Runs a low-priority FreeRTOS task that manages blink patterns based on system state:
+Provides visual feedback using a single GPIO pin. By default, this uses the ESP32's built-in blue LED on GPIO2, but it can be configured to use any external LED, or disabled entirely for stealth deployments. Runs a low-priority FreeRTOS task that manages blink patterns based on system state:
 - **Portal Mode** — toggles every 200ms (fast blink ~2.5Hz)
 - **Connecting** — toggles every 1000ms (slow pulse ~0.5Hz)
 - **Ready** — solid ON
