@@ -35,9 +35,11 @@ Configure it once through the built-in captive portal — then forget it exists.
 ## ✦ What It Does
 
 ```text
-  [ MQTT Broker ] ──── TLS ────► [ Heimdall / ESP32 ] ──── UDP ────► [ Sleeping PC ]
-                                         👁
-                                    Always Watching
+  [ MQTT Broker ] ──── TLS ────► [ Heimdall / ESP32 ] ──── UDP ────► [ Target PC ]
+        │                                👁                                ▲
+        │                           Always Watching                        │
+        └──────────────────────────── TLS ─────────────────────────────────┘
+                               (Sleep Listener)
 ```
 
 Heimdall is a complete remote power management and network security tool built for the ESP32. Out of the box, it provides:
